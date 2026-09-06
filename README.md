@@ -15,6 +15,24 @@ CDM includes the following times:
 - ASRT: Actual Start-Up Request Time.
 - CTOT: Calculated Take Off Time.
 
+## EuroScope Plugin Bridge
+
+CDM optionally publishes its operational data through the
+[EuroScope Plugin Bridge](https://github.com/AlexisBalzano/Euroscope-Plugin-Bridge).
+The bridge is discovered at runtime, so CDM continues to work normally when it
+is not installed.
+
+To enable the integration, install the latest
+[`EuroScopeBridge.dll` release](https://github.com/AlexisBalzano/Euroscope-Plugin-Bridge/releases)
+and load it in EuroScope through **Other Settings > Plug-ins > Load**. Do not
+place a private copy of the bridge DLL in the CDM distribution. Verify the
+connection with `.esb providers`; CDM is registered as `com.viffsys.cdm`.
+
+The aircraft-scoped schema publishes TOBT, TSAT, TTOT, CTOT, TSAC, ASRT, ASAT,
+de-icing state, TOBT source, flow/ECFMP restriction information, and whether the
+CTOT is manual. Times are signed 64-bit minutes since midnight UTC. Fields are
+eligible for the bridge's opt-in remote relay; relay configuration and remote
+publisher arbitration remain the responsibility of bridge consumers.
 
 ## How to use:
 - Load up the plugin.

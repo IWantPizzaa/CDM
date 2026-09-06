@@ -379,5 +379,8 @@ class CDM : public EuroScopePlugIn::CPlugIn {
         customBlockCapacities;  // {runway, hour, blockIndex} -> custom capacity
 
    private:
+    void updateBridge();
+    void shutdownBridge();
+
     std::shared_ptr<interfaces::IRestClient> restclient_;
 };
