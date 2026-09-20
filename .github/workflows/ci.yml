@@ -37,7 +37,7 @@ jobs:
 
   build:
     needs: format-check
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -45,8 +45,11 @@ jobs:
           submodules: recursive
 
       - name: Configure CMake
+        env:
+          CDM_API_KEY: ${{ secrets.CDM_API_KEY }}
         run: cmake --preset vcpkg
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DCDM_API_KEY="$env:CDM_API_KEY"
 
       - name: Build
         run: cmake --build build --parallel
@@ -60,7 +63,7 @@ jobs:
 
   unit-tests:
     needs: build
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - name: Checkout
         uses: actions/checkout@v7

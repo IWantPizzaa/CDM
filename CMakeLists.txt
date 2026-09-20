@@ -30,6 +30,12 @@ ENDIF ()
 #     ${CMAKE_BINARY_DIR}/Version.h
 # )
 
+SET(CDM_API_KEY "" CACHE STRING "CDM-API key baked into the built plugin")
+CONFIGURE_FILE(
+    ${CMAKE_SOURCE_DIR}/src/Secrets.h.in
+    ${CMAKE_BINARY_DIR}/Secrets.h
+)
+
 INCLUDE_DIRECTORIES(
     ${CMAKE_BINARY_DIR}
     ${CMAKE_SOURCE_DIR}/src/
