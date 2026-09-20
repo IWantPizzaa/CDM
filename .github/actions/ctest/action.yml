@@ -17,9 +17,9 @@ runs:
       run: |
         if ($env:TEST_LABEL) {
           Write-Host "Running $env:TEST_LABEL tests"
-          ctest --test-dir build --output-on-failure -L $env:TEST_LABEL
+          ctest --test-dir build --output-on-failure --build-config Release -L $env:TEST_LABEL
         }
         else {
           Write-Host "Running tests"
-          ctest --test-dir build --output-on-failure
+          ctest --test-dir build --output-on-failure --build-config Release
         }

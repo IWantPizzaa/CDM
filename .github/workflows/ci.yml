@@ -52,7 +52,7 @@ jobs:
           -DCDM_API_KEY="$env:CDM_API_KEY"
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --config Release --parallel
 
       - name: Upload build
         uses: actions/upload-artifact@v7
