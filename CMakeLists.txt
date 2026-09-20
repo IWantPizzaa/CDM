@@ -30,6 +30,9 @@ ENDIF ()
 #     ${CMAKE_BINARY_DIR}/Version.h
 # )
 
+OPTION(CDM_REQUIRE_API_KEY "Fail configuration when the CDM API key is missing" OFF)
+INCLUDE(cmake/ConfigureSecrets.cmake)
+
 INCLUDE_DIRECTORIES(
     ${CMAKE_BINARY_DIR}
     ${CMAKE_SOURCE_DIR}/src/
@@ -99,3 +102,12 @@ TARGET_INCLUDE_DIRECTORIES(${PROJECT_NAME}_shared PUBLIC
 #SET(gtest_force_shared_crt on)
 #INCLUDE(CTest)
 #ADD_SUBDIRECTORY(tests)
+
+INCLUDE(CTest)
+IF (BUILD_TESTING)
+    ADD_TEST(NAME api_key_configuration
+        COMMAND ${CMAKE_COMMAND}
+            -DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/api-key-tests
+            -P ${CMAKE_SOURCE_DIR}/tests/test_api_key_config.cmake)
+    SET_TESTS_PROPERTIES(api_key_configuration PROPERTIES LABELS unit)
+ENDIF ()

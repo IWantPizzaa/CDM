@@ -10,6 +10,7 @@
 #include "esbridge.h"
 #include "pugixml.cpp"
 #include "pugixml.hpp"
+#include "Secrets.h"
 #include "src/api/CurlRestClient.h"
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
@@ -80,7 +81,7 @@ string flowRestrictionsUrl;
 string cdm_api;
 string myAtcCallsign;
 bool option_su_wait;
-string apikey;
+string apikey = CDM_API_KEY;
 bool serverEnabled;
 bool sftpConnection;
 bool refresh1;

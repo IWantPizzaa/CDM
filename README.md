@@ -610,6 +610,31 @@ As soon as departures are listed the list will be correctly displayed:
 
 Install vcpkg [see here (steps 1. - 2.1)](https://learn.microsoft.com/en-us/vcpkg/get_started/get-started?pivots=shell-cmd)
 
-Configure the project using ```cmake --preset default```
+For local PowerShell builds, set `VCPKG_ROOT` to your vcpkg installation and
+provide `CDM_API_KEY` in the build environment. To enter the key without putting
+its value in command history:
 
-Build the DLL using ```cmake --build build --config Release```
+```powershell
+$cdmKey = Read-Host "CDM API key" -AsSecureString
+$env:CDM_API_KEY = [System.Net.NetworkCredential]::new('', $cdmKey).Password
+cmake --preset vcpkg -DCDM_REQUIRE_API_KEY=ON
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+The preset targets Visual Studio 2022, Win32. For another installed Visual Studio
+version, configure with its matching generator and the `x86-windows-static`
+vcpkg triplet. An explicit `-DCDM_API_KEY="$env:CDM_API_KEY"` also works, but stores
+the key in the local CMake cache and takes precedence over the environment.
+Environment-only configuration avoids caching the key. A missing key fails
+configuration when `CDM_REQUIRE_API_KEY=ON`; otherwise it warns and produces a
+build without API authentication, suitable for pull-request checks.
+
+For GitHub Actions, create the repository Actions secret **`CDM_API_KEY`** under
+Settings > Secrets and variables > Actions. Trusted pushes to `master`/`main`
+and manual runs require that secret; pull-request builds never receive it.
+CI builds Release, runs the configuration tests, and uploads only `CDM.dll`.
+Generated `Secrets.h`, CMake caches, objects, and debug symbols must not be
+committed or uploaded. The key is embedded in the DLL and can be extracted by
+someone with the binary; a GitHub secret protects build inputs, not distributed
+client-side credentials.

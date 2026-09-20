@@ -2,6 +2,8 @@
 *.d
 vcpkg_installed/
 CMakeUserPresets.json
+Secrets.h
+CMakeCache.txt
 
 # Compiled Object files
 *.slo
