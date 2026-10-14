@@ -3,9 +3,11 @@
 #include "EuroScopePlugIn.h"
 #pragma warning(pop)
 #include <algorithm>
+#include <atomic>
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
 #include <chrono>
+#include <condition_variable>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -14,19 +16,20 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
-#include "Constant.hpp"
-#include "Plane.h"
-#include "Rate.h"
-#include "ServerRestricted.h"
 #include "json/json.h"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
-#include "sidInterval.h"
 #include "src/api/IRestClient.h"
+#include "src/models/Constant.hpp"
+#include "src/models/Plane.h"
+#include "src/models/Rate.h"
+#include "src/models/ServerRestricted.h"
+#include "src/models/sidInterval.h"
 #define CURL_STATICLIB
 #include <dbghelp.h>
 #include <windows.h>
@@ -48,7 +51,7 @@
 #endif
 
 #define MY_PLUGIN_NAME "CDM Plugin"
-#define MY_PLUGIN_VERSION "2.29.1"
+#define MY_PLUGIN_VERSION "2.30"
 #define MY_PLUGIN_DEVELOPER "Roger Puig"
 #define MY_PLUGIN_COPYRIGHT "GPL v3"
 #define MY_PLUGIN_VIEW_AVISO "Euroscope CDM"
@@ -132,6 +135,34 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     void multithread(void (CDM::*f)());
 
+    // Runs a CDM member function on a detached background thread while keeping
+    // this object alive for the duration of the call. Every fire-and-forget
+    // thread in this plugin must go through here instead of calling
+    // std::thread(...).detach() directly: a bare detached thread that captures
+    // `this` can still be executing when EuroScope destroys the plugin object,
+    // which is a use-after-free. runDetachedTask() tracks in-flight tasks so the
+    // destructor can wait for them to finish before the object goes away.
+    template <typename Func, typename... Args>
+    void runDetachedTask(Func f, Args... args) {
+        activeAsyncTasks_.fetch_add(1, std::memory_order_relaxed);
+        std::thread([this, f, args...]() mutable {
+            try {
+                (this->*f)(args...);
+            } catch (...) {
+                // Swallow: a background task must never propagate an exception
+                // onto a detached thread (that would call std::terminate).
+            }
+            if (activeAsyncTasks_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                std::lock_guard<std::mutex> lock(asyncTasksMutex_);
+                asyncTasksCv_.notify_all();
+            }
+        }).detach();
+    }
+
+    // Blocks until all tasks started via runDetachedTask() have completed, or
+    // until the timeout elapses. Must be called before the object is destroyed.
+    void waitForDetachedTasks(std::chrono::milliseconds timeout = std::chrono::seconds(60));
+
     bool patternMatches(const string& pattern, const string& str);
 
     bool checkIsNumber(string str);
@@ -141,8 +172,6 @@ class CDM : public EuroScopePlugIn::CPlugIn {
     string getCidByCallsign(string callsign);
 
     bool flightHasCtotDisabled(string callsign);
-
-    void getEcfmpData();
 
     void getSidIntervalValuesUrl(string url);
 
@@ -228,6 +257,19 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     bool getCtotsFromUrl(string url);
 
+    // Non-CDM airport EXOT taxi time support
+    bool hasNonCdmTaxiZones(string airport);
+
+    int getNonCdmTaxiTime(string airport);
+
+    int getNonCdmTaxiTime(string airport, string runway);
+
+    int getNonCdmTaxiTimeWithPolygonMatch(string airport, string runway, double flightLat, double flightLon);
+
+    void processNonCdmExotFlights();
+
+    bool sendNonCdmExotMessage(string callsign, string airport, int taxiTimeMinutes);
+
     int GetdifferenceTime(string hour1, string min1, string hour2, string min2);
 
     int GetDifferenceTimeHHMMSS(const std::string& time1, const std::string& time2, bool negativeValues);
@@ -306,6 +348,10 @@ class CDM : public EuroScopePlugIn::CPlugIn {
                        string TSATfinal, string TTOTFinal, string origin, int taxiTime, string depRwy, Rate dataRate,
                        bool aircraftFind, bool aicraftInFinalTimesList);
 
+    string getCorrectTTOT(string TTOTInitial, bool hasManualCtot, const vector<Plane>& planes, int rateHour,
+                          const string& callsign, const string& origin, const string& depRwy, const string& timeNow,
+                          double taxiTime, const string& mySid, Rate dataRate, bool& sameOrDependantRwysOut);
+
     string getCorrectTTOT_Windowed(string TTOTInitial, bool hasManualCtot, const vector<Plane>& planes, int rateHour,
                                    const string& callsign, const string& origin, const string& depRwy,
                                    const string& timeNow, double taxiTime, const string& mySid,
@@ -345,8 +391,6 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     void refreshActions1();
 
-    void refreshActions2();
-
     void refreshActions3();
 
     void refreshActions4();
@@ -383,4 +427,8 @@ class CDM : public EuroScopePlugIn::CPlugIn {
     void shutdownBridge();
 
     std::shared_ptr<interfaces::IRestClient> restclient_;
+
+    std::atomic<int> activeAsyncTasks_{0};
+    std::mutex asyncTasksMutex_;
+    std::condition_variable asyncTasksCv_;
 };

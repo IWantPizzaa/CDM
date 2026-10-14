@@ -1,4 +1,28 @@
-# CDM 2.29.1
+# CDM 2.30
+
+Windows x86 (32-bit) build for EuroScope, based on rpuig2001/CDM `master`
+at `7570ecc0` (14 October 2026).
+
+## Changes since 2.29.1
+
+- Integrated the upstream 2.30 plugin, including its reorganized source tree,
+  advanced-airport handling and ATFCM messaging updates.
+- Kept the authenticated CDM API build using `CDM_API_KEY`. The upstream test
+  credential no longer replaces the configured key when the plugin loads.
+- Kept the EuroScope Plugin Bridge provider `com.viffsys.cdm` in
+  `src/core/CDM_Bridge.cpp`. The ECFMP field remains in its schema for
+  compatibility and is empty because upstream removed ECFMP data.
+- Existing `CDMconfig.xml` files remain usable; new optional settings use
+  defaults when absent.
+
+## Install or update
+
+Close EuroScope, back up the current plugin folder, and replace only `CDM.dll`
+with the Release build. Keep the existing XML and other local configuration
+files. The build must receive `CDM_API_KEY` through its environment or CMake
+configuration; the key is embedded in the DLL.
+
+## Previous release: 2.29.1
 
 Windows x86 (32-bit) build for EuroScope, from the IWantPizzaa/CDM fork.
 

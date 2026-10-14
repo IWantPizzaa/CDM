@@ -29,8 +29,10 @@ place a private copy of the bridge DLL in the CDM distribution. Verify the
 connection with `.esb providers`; CDM is registered as `com.viffsys.cdm`.
 
 The aircraft-scoped schema publishes TOBT, TSAT, TTOT, CTOT, TSAC, ASRT, ASAT,
-de-icing state, TOBT source, flow/ECFMP restriction information, and whether the
-CTOT is manual. Times are signed 64-bit minutes since midnight UTC. Fields are
+de-icing state, TOBT source, flow restriction information, and whether the
+CTOT is manual. The ECFMP restriction field remains in the schema for older
+consumers but is empty in version 2.30 because upstream removed ECFMP data.
+Times are signed 64-bit minutes since midnight UTC. Fields are
 eligible for the bridge's opt-in remote relay; relay configuration and remote
 publisher arbitration remain the responsibility of bridge consumers.
 
@@ -45,11 +47,13 @@ publisher arbitration remain the responsibility of bridge consumers.
 
     or
 
-  ![image](https://i.gyazo.com/928f2e35f0a4248e17442bba552d72e0.png)
+  <img width="429" height="101" alt="image" src="https://github.com/user-attachments/assets/3805fdd1-1854-4a60-b334-1442c093ea47" />
+
 
 - E
 
-  ![image](https://i.gyazo.com/436e8eb7b20b00d2c39a483319d03425.png)
+  <img width="420" height="101" alt="image" src="https://github.com/user-attachments/assets/c1992494-eb94-4076-b275-2098d6aae09d" />
+
 
 - TOBT
 
@@ -57,15 +61,18 @@ publisher arbitration remain the responsibility of bridge consumers.
 
     or
 
-  ![image](https://i.gyazo.com/ad6344055e7de91ab8a386f7153d19e1.png)
+  <img width="420" height="94" alt="image" src="https://github.com/user-attachments/assets/54aaf31a-e7cc-4039-94fa-160e95fee4a5" />
+
 
 - TSAT
 
-  ![image](https://i.gyazo.com/37b0ad531fc4a32dfaffbf7db83c5546.png)
+  <img width="418" height="99" alt="image" src="https://github.com/user-attachments/assets/e3aab239-ced6-4346-b768-19be7e12f117" />
+
 
 - TTOT
 
-  ![image](https://i.gyazo.com/4533873ef8d8342cb5b35ed381bb0f47.png)
+  <img width="420" height="99" alt="image" src="https://github.com/user-attachments/assets/9fabf56d-f1b8-45a4-934a-b705f97dfc4c" />
+
 
 - TSAC
 
@@ -73,11 +80,13 @@ publisher arbitration remain the responsibility of bridge consumers.
 
     or
 
-  ![image](https://i.gyazo.com/8f9d55ec477a8c21ddb63df3b4da15a1.png)
+  <img width="418" height="97" alt="image" src="https://github.com/user-attachments/assets/87d6a387-9769-428a-85d1-16b45aa0e675" />
+
 
 - ASAT
 
-  ![image](https://i.gyazo.com/cf08823153ce9e99e1936659c07ad67d.png)
+  <img width="421" height="102" alt="image" src="https://github.com/user-attachments/assets/2ebd1c98-79e6-4b2e-8f29-b9b9d1ad805b" />
+
 
 - ASRT
 
@@ -89,7 +98,8 @@ publisher arbitration remain the responsibility of bridge consumers.
 
     or
 
-  ![image](https://i.gyazo.com/775e1bf69fac29e2e3a776d35e67952a.png)
+  <img width="417" height="97" alt="image" src="https://github.com/user-attachments/assets/57eddfc6-96d7-49d9-b5ae-e57faefe490e" />
+
  
 - Network Status
   
@@ -105,7 +115,8 @@ publisher arbitration remain the responsibility of bridge consumers.
 
 - Ready Start-up
 
-  ![image](https://i.gyazo.com/842144f7bddf11f3c9165c42ef0f940e.png)
+  <img width="430" height="101" alt="image" src="https://github.com/user-attachments/assets/71329668-45d3-41d0-a0b5-5b3608ca7516" />
+
 
 - Extra (All CDM Option in one Menu)
 
@@ -147,7 +158,7 @@ publisher arbitration remain the responsibility of bridge consumers.
   - Block Movement Index Mode to calculate times as "windows" (**DISABLED:** bmi mode="false" and **ENABLED:** bmi mode="true").
   - Pilot Tobt to enable/disable the automatic update of TOBT by Pilots (**DISABLED:** pilotTobt mode="false" and **ENABLED:** pilotTobt mode="true").
   - Auto ATOT to enable/disable automatic update TTOT when "DEPA" sts is set (**DISABLED:** autoAtot mode="false" and **ENABLED:** autoAtot mode="true").
-  - Invalidate flight at tsat will invalidate flights at TSAT+6 (ex. invalidateAtTsat mode=true). By setting "asrt" it will not invalidate at TOBT+6 if ASRT is set.
+  - Invalidate flight at tsat will invalidate flights at TSAT+6 (ex. invalidateAtTsat mode=true). By setting "asrt" it will not invalidate at TSAT+6 if ASRT is set.
   - Invalidate flight at tobt will invalidate flights at TOBT+5 (ex. invalidateAtTobt mode=true).
   - When Ready TOBT is pressed, automatically set the TSAC as the calculated TSAT (ex. readySetTsac mode=true).
   - [OPTIONAL] Rates URL (ex. Rates url="https://........"), if no URL needed, just leave it blank (ex. Rates url="") and the file will be used.
@@ -160,7 +171,6 @@ publisher arbitration remain the responsibility of bridge consumers.
   - Event Mode minutes, it specifies the amount of minutes to add to all flights by default (if not configured EVENT_EXTRA_TIME in taxizones) when event mode is enabled (by command) (ex. eventModeMin time="5").
   - Refresh Time in seconds (ex. RefreshTime seconds="20").
   - Debug mode activated (true) or desactivated (false) (ex. Debug mode="false" or Debug mode="true").
-  - [OPTIONAL] In case MDIs or other STAM measures system are used (ECFMP and Hong Kong systems are already in the vIFF system and **don't require this setting**)  (Default -> FlowRestrictions url:""). The format required is as ECFMP. example: https://ecfmp.vatsim.net/api/v1/plugin.
   - VDGS file type: 0-None, 1-TXT, 2-JSON, 3-TXT&JSON (ex. vdgsFileType type="3").
   - [OPTIONAL] FTP host to push CDM Data (ex. ftpHost host:"ftp.aaaaaa.com") - leave it blank to use ATFCM System.
   - [OPTIONAL] FTP user to push CDM Data (ex. ftpUser user:"username") - leave it blank to use ATFCM System.
@@ -175,9 +185,16 @@ publisher arbitration remain the responsibility of bridge consumers.
   - Event Priority over non CTOT flights. CTOT flights will still have priority over event (Example: ```<eventPriority mode="true" />```) - Event Slot column is not required.
   - Automatically set as TOBT the Slot provided for Event (Example: ```<autoSetTobtFromEvSlot mode="true" />```) - Event Slot column is not required.
   - Customized Private message (Example: ```<PrivateMessage text="[CDM MSG] PLEASE, MONITOR https://vats.im/vdgs FOR CDM AND ATFCM UPDATES. [END OF CDM MSG]" />```).
+  - [OPTIONAL] Customized ATFCM panel private messages. `fls` for expired-slot messages and `slot` for slot-allocation messages. Supported placeholders are `{CALLSIGN}`, `{EOBT}`, `{TOBT}`, `{CTOT}` and `{REGUL}`. Example:
+    ```xml
+    <AtfcmPrivateMessage
+        fls="[ATFCM MSG] OFF-BLOCK TIME EXPIRED - {CALLSIGN} ({EOBT} - {TOBT}). Please update your off-block time."
+        slot="[ATFCM MSG] SLOT ALLOCATION - {CALLSIGN} ({EOBT} - {TOBT}) CTOT:{CTOT} REGUL:{REGUL}. Please monitor for updates." />
+    ```
   - Set the CTOT in remarks (Example: ```<remarksOptionCtot mode="true" />```).
   - Configures if TOBT updates after setting ASRT should be processed or not (TRUE: NOT PROCESSED / FALSE: PROCESSED) (Example: ```<disableTobtReqAfterAsrt mode="true" />```).
   - Set the loading text while times are "processing" (Example: ```<loading text="...." />```)
+  - [OPTIONAL] Display the EOBT with ```color14``` to indicate that the EOBT is in the far future or in the past. The configured color will be displayed when nonCdmEarlyClearenceColor > 0 AND is not FLS AND Clearence Flag is not set. Between EOBT-5 and EOBT+nonCdmEarlyClearenceColor the color will not be displayed (Example: ```<nonCdmEarlyClearenceColor minutes="30" />```).
  
 ### taxizones.txt
   - You can define a zone with an specific taxiTime with the following specifications:
@@ -241,7 +258,15 @@ publisher arbitration remain the responsibility of bridge consumers.
 
 *Examples can be found in the givenfiles.*
 
+## Advanced Airports (Non-ACDM) - Not yet available.
+  ### What are Advanced airports within vIFF/CDM?
+  Advanced airports are non-acdm, but as a difference from "standard airports" (non-ACDM and non-Advanced) they provide some information to the centralised vIFF network. In vIFF/CDM, only a more precise taxi time is provided.
 
+  ### Required definitions within CDM Plugin
+  - Taxi Zones can be configured as for CDM Airports. The only requirement, is to not configure the airports in the rate.txt file.
+  - Taxizones specifications: De-ice and Extra event times are not required (as they will not affect the non-acdm handling).
+  - EXOT will be provided to vIFF at the moment of connection and in case runway is changed (In Euroscope).
+  - In case of no specific row found but taxizones for that airport are defined (while is not ACDM - not configured in rates.txt), the default taxi-time will be provided.
 
 ## Event SLOTs
 ### How does it work?

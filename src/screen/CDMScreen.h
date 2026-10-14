@@ -26,7 +26,7 @@ struct PendingMasterChange {
 // Pending block capacity change structure
 struct PendingBlockChange {
     std::string runway;
-    int blockHour;        // Hour this block belongs to (19, 20, etc.)
+    int blockHour;  // Hour this block belongs to (19, 20, etc.)
     int blockIndex;
     int newCapacity;
     int previousCapacity;  // To allow reverting changes
@@ -68,7 +68,8 @@ class CDMScreen : public CRadarScreen {
     void UpdateBlocksData(const std::string& airport);
     void RefreshBlocksData();
     void SetRunwayFilter(const std::string& runway);
-    std::vector<std::pair<std::string, std::string>> GetCallsignsForBlock(const std::string& runway, int blockHour, int blockIndex);
+    std::vector<std::pair<std::string, std::string>> GetCallsignsForBlock(const std::string& runway, int blockHour,
+                                                                          int blockIndex);
     std::vector<std::string> GetBlockRunways() const;
 
     static constexpr int MAX_AIRPORTS_DISPLAYED = 9999;
@@ -87,7 +88,6 @@ class CDMScreen : public CRadarScreen {
     // -----------------------
     RECT masterAirportPanelRect;
     RECT masterAirportBtnRects[MAX_AIRPORTS_DISPLAYED];
-    RECT plusBtnRect;
     RECT minBtnRect;
 
     std::vector<std::string> cached_airports;
@@ -116,15 +116,17 @@ class CDMScreen : public CRadarScreen {
     POINT blocksPanelPos{1100, 100};
     RECT blocksPanelRect{0, 0, 0, 0};
     std::vector<BlockData> currentBlocksData;
-    std::map<std::tuple<std::string, int, int>, int> customBlockCapacities;  // {runway, hour, blockIndex} -> custom capacity override
-    std::map<std::tuple<std::string, int, int>, int> calculatedBlockCapacities;  // {runway, hour, blockIndex} -> default calculated capacity
+    std::map<std::tuple<std::string, int, int>, int>
+        customBlockCapacities;  // {runway, hour, blockIndex} -> custom capacity override
+    std::map<std::tuple<std::string, int, int>, int>
+        calculatedBlockCapacities;  // {runway, hour, blockIndex} -> default calculated capacity
     std::chrono::steady_clock::time_point lastBlocksDataUpdate;  // Debounce frequent updates
-    std::string selectedBlockRunway;  // For displaying callsigns of a selected block
-    int selectedBlockIndex = -1;  // -1 means no block selected
-    int selectedBlockHour = -1;  // -1 means no hour selected (for BMI mode)
-    std::vector<PendingBlockChange> pendingBlockChanges;  // Pending capacity changes waiting for APPLY
-    RECT blocksPanelApplyBtnRect;  // Rectangle for APPLY button
-    
+    std::string selectedBlockRunway;                             // For displaying callsigns of a selected block
+    int selectedBlockIndex = -1;                                 // -1 means no block selected
+    int selectedBlockHour = -1;                                  // -1 means no hour selected (for BMI mode)
+    std::vector<PendingBlockChange> pendingBlockChanges;         // Pending capacity changes waiting for APPLY
+    RECT blocksPanelApplyBtnRect;                                // Rectangle for APPLY button
+
     // Pending block changes methods
     void ApplyPendingBlockChanges();
     void RevertPendingBlockChanges();
