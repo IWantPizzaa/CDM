@@ -457,7 +457,7 @@ CDM::CDM(void)
 
     // CDM-Server
     if (cdmServerUrl.length() <= 1) {
-        cdmServerUrl = "https://api.viffsys.com";
+        cdmServerUrl = "https://viffsys.up.railway.app";
     }
 
     if (customRestrictedUrl.length() <= 1) {

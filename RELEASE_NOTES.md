@@ -1,4 +1,16 @@
-# CDM 2.30
+# CDM 2.30.2
+
+Windows x86 (32-bit) build for EuroScope, integrating the official 2.30.1 and
+2.30.2 patches through `rpuig2001/CDM` commit `9e7c4d0d`.
+
+## Changes since 2.30
+
+- Exclude flights with a CTOT from Startup Delay and Departure Delay commands.
+- Accept multiple runways in traffic-rate `noDep` and `noArr` settings.
+- Use the current vIFF endpoint, `https://viffsys.up.railway.app`.
+- Preserve the fork's authenticated API build and EuroScope Plugin Bridge provider.
+
+## Previous release: 2.30
 
 Windows x86 (32-bit) build for EuroScope, based on rpuig2001/CDM `master`
 at `7570ecc0` (14 October 2026).

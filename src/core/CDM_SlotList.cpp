@@ -90,6 +90,7 @@ vector<Plane> CDM::backgroundProcess_recaulculate() {
                 }
 
                 myEOBT = copySlotList[i].eobt;
+                const bool hasCtot = copySlotList[i].hasManualCtot && !copySlotList[i].ctot.empty();
 
                 Rate dataRate = rateForRunway(myFlightPlan.GetFlightPlanData().GetOrigin(),
                                               myFlightPlan.GetFlightPlanData().GetDepartureRwy(),
@@ -115,7 +116,8 @@ vector<Plane> CDM::backgroundProcess_recaulculate() {
 
                 myTSAT = myEOBT;
                 myTTOT = calculateTime(myEOBT, myTTime);
-                if ((addTime || tempAddTime_DELAY_TSAT || tempAddTime_DELAY_TTOT) && !aicraftInFinalTimesList) {
+                if ((addTime || tempAddTime_DELAY_TSAT || tempAddTime_DELAY_TTOT) && !aicraftInFinalTimesList &&
+                    !hasCtot) {
                     if (tempAddTime_DELAY_TSAT || tempAddTime_DELAY_TTOT) {
                         string timeToUse = myTimeToAddTemp_DELAY;
                         if (tempAddTime_DELAY_TTOT) {
@@ -159,14 +161,30 @@ vector<Plane> CDM::backgroundProcess_recaulculate() {
                     }
                 }
 
-                if (copySlotList[i].hasManualCtot && copySlotList[i].ctot != "") {
+                if (hasCtot) {
                     string ctotTTOT = copySlotList[i].ctot + "00";
                     string ctotTSAT = calculateLessTime(ctotTTOT, myTTime);
                     // Only use CTOT if it doesn't push TSAT before EOBT
-                    if (stoi(ctotTSAT) >= stoi(myEOBT)) {
-                        myTTOT = ctotTTOT;
-                    } else {
-                        myTTOT = calculateTime(myEOBT, myTTime);  // natural departure
+                    int tsatEobtDiff = ToMinutes(ctotTSAT) - ToMinutes(myEOBT);
+                    if (tsatEobtDiff < -720)
+                        tsatEobtDiff += 1440;
+                    else if (tsatEobtDiff > 720)
+                        tsatEobtDiff -= 1440;
+
+                    if (tsatEobtDiff >= 0) {
+                        int ctotMinutes = ToMinutes(ctotTTOT);
+                        int currentMinutes = ToMinutes(myTTOT);
+                        int diff = currentMinutes - ctotMinutes;
+
+                        // Handle midnight crossing when comparing the CTOT with the natural TTOT.
+                        if (diff < -720)
+                            diff += 1440;
+                        else if (diff > 720)
+                            diff -= 1440;
+
+                        if (diff <= 0) {
+                            myTTOT = ctotTTOT;
+                        }
                     }
                 }
 
