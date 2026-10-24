@@ -1,4 +1,17 @@
-# CDM 2.30.2
+# CDM 2.30.3
+
+Windows x86 (32-bit) build for EuroScope, based on the official 2.30.3 patch
+at `rpuig2001/CDM` commit `0ddb543b`.
+
+## Changes since 2.30.2
+
+- Updated the vIFF authentication credential used by the Release DLL. Builds
+  still receive it through `CDM_API_KEY`; it is not stored in the source tree.
+- Preserved the fork's EuroScope Plugin Bridge provider and CTOT delay behavior.
+- No XML change is required; keep the existing `CDMconfig.xml` and other local
+  configuration files.
+
+## Previous release: 2.30.2
 
 Windows x86 (32-bit) build for EuroScope, integrating the official 2.30.1 and
 2.30.2 patches through `rpuig2001/CDM` commit `9e7c4d0d`.
