@@ -487,9 +487,9 @@ bool CDM::OnCompileCommand(const char* sCommandLine) {
                     callsign = ControllerMyself().GetCallsign();
                     if (callsign.size() > 3) {
                         if (callsign.find("_DEL") != string::npos || callsign.find("_GND") != string::npos ||
-                            callsign.find("_RMP") != string::npos || callsign.find("_TWR") != string::npos ||
-                            callsign.find("_APP") != string::npos || callsign.find("_CTR") != string::npos ||
-                            callsign.find("_FMP") != string::npos) {
+                            callsign.find("_RMP") != string::npos || callsign.find("_DEP") != string::npos ||
+                            callsign.find("_TWR") != string::npos || callsign.find("_APP") != string::npos ||
+                            callsign.find("_CTR") != string::npos || callsign.find("_FMP") != string::npos) {
                             correctPosition = true;
                         }
                     }
@@ -533,9 +533,9 @@ bool CDM::OnCompileCommand(const char* sCommandLine) {
                     callsign = ControllerMyself().GetCallsign();
                     if (callsign.size() > 3) {
                         if (callsign.find("_DEL") != string::npos || callsign.find("_GND") != string::npos ||
-                            callsign.find("_RMP") != string::npos || callsign.find("_TWR") != string::npos ||
-                            callsign.find("_APP") != string::npos || callsign.find("_CTR") != string::npos ||
-                            callsign.find("_FMP") != string::npos) {
+                            callsign.find("_RMP") != string::npos || callsign.find("_DEP") != string::npos ||
+                            callsign.find("_TWR") != string::npos || callsign.find("_APP") != string::npos ||
+                            callsign.find("_CTR") != string::npos || callsign.find("_FMP") != string::npos) {
                             correctPosition = true;
                         }
                     }
