@@ -1,4 +1,42 @@
-# CDM 2.30.3
+# CDM 2.31.6b
+
+Windows x86 (32-bit) plugin sources for EuroScope, integrating all 19 official
+commits since 2.30.3 through `rpuig2001/CDM` commit `b5a26bff` (12 November 2026).
+The official plugin version is a beta.
+
+## Changes since 2.30.3
+
+- Added Estimated Runway Waiting Time (ERWT), including commit `01cf5ca9`:
+  XML defaults, optional per-runway values in `rate.txt`, and `.cdm erwt`
+  commands. ERWT allows earlier startup while retaining the sequenced TTOT.
+- Added the `Auto Start-up` tag item and `Toggle Auto Start-up` function.
+  Its armed/assigned state is shared through flight strips between controllers.
+- Added master-airport synchronization with vIFF for direct VATSIM connections.
+- Integrated CTOT sequencing fixes after TOBT changes, optional immediate TOBT
+  recalculation, and TTOT conflict checks against frozen flights and BMI slots.
+- Integrated de-icing data updates, ATFCM informed status for relevant flights,
+  support for DEP controller positions, and safer background-task shutdown.
+- Preserved build-time API authentication, the `com.viffsys.cdm` bridge provider,
+  its periodic publication, and the fork's exclusion of CTOT flights from
+  Startup Delay and Departure Delay commands.
+
+## Configuration
+
+Existing XML and `rate.txt` files remain compatible. ERWT is disabled when the
+XML setting is absent or zero. To enable it, add `<erwt minutes="15"/>` inside
+the existing `<CDM>` element, or run `.cdm erwt 15`. Per-runway examples:
+`.cdm erwt LFPG/26R 10` and `.cdm erwt LFPG/26R default`.
+
+The optional `<recalculateOnTobtUpdate mode="true"/>` setting enables immediate
+background-sequence recalculation after TOBT updates; it is disabled by default.
+To use automatic startup, add `Auto Start-up` to the EuroScope departure list
+and bind its click action to `Toggle Auto Start-up`.
+
+Replace only the compiled Release `CDM.dll` when installing. Keep existing
+airport, rate, taxi-zone, color, and XML files. Authenticated builds still
+require `CDM_API_KEY` through the environment or CMake configuration.
+
+## Previous release: 2.30.3
 
 Windows x86 (32-bit) build for EuroScope, based on the official 2.30.3 patch
 at `rpuig2001/CDM` commit `0ddb543b`.

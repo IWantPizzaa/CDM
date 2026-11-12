@@ -34,14 +34,22 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
         AtcMe = false;
         string position = ControllerMyself().GetCallsign();
         bool isPositionOk = position.find("_DEL") != string::npos || position.find("_GND") != string::npos ||
-                            position.find("_RMP") != string::npos || position.find("_TWR") != string::npos ||
-                            position.find("_APP") != string::npos || position.find("_CTR") != string::npos ||
-                            position.find("_FMP") != string::npos;
+                            position.find("_RMP") != string::npos || position.find("_DEP") != string::npos ||
+                            position.find("_TWR") != string::npos || position.find("_APP") != string::npos ||
+                            position.find("_CTR") != string::npos || position.find("_FMP") != string::npos;
         if ((fp.GetTrackingControllerIsMe() || strlen(fp.GetTrackingControllerId()) == 0) && isPositionOk) {
             AtcMe = true;
         }
 
-        if (FunctionId == TAG_FUNC_PM_SEND) {
+        if (FunctionId == TAG_FUNC_TOGGLE_AUTO_STARTUP) {
+            if (master && AtcMe) {
+                const string callsign = fp.GetCallsign();
+                const string autoStartup = getFlightStripInfo(fp, 10);
+                setFlightStripInfo(fp, autoStartup == "1" || autoStartup == "2" ? "" : "1", 10);
+                tagItemDisplayCache.erase(callsign);
+                PushToOtherControllers(fp);
+            }
+        } else if (FunctionId == TAG_FUNC_PM_SEND) {
             sendCdmMessageToPilot(fp.GetCallsign());
         } else if (FunctionId == TAG_FUNC_EDITEOBT) {
             // Can be modified as non-master
@@ -691,9 +699,7 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
                     } else if (AtcMe) {
                         addLogLine("TRIGGER - TAG_FUNC_READYTOBT_SLAVE");
                         if (getFlightStripInfo(fp, 2) != formatTime(GetActualTime())) {
-                            setFlightStripInfo(fp, formatTime(GetActualTime()), 2);
                             string timeNow = GetActualTime();
-
                             // Set REQ TOBT
                             runDetachedTask(&CDM::setCdmSts, fp.GetCallsign(), "REQTOBT/" + timeNow + "/ATC");
                         }

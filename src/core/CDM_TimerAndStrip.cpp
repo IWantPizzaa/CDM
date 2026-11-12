@@ -1,4 +1,4 @@
-// OnTimer blink counter, flight-strip annotation get/set, and the periodic background
+// Automatic startup, flight-strip annotation get/set, and the periodic background
 // refresh actions 1-4. Moved verbatim out of CDMSingle.cpp.
 // See src/core/CDMGlobals.hpp for the shared-state rationale.
 
@@ -9,7 +9,6 @@ void CDM::OnTimer(int Counter) {
     updateBridge();
 
     FuncBuffer = 0;
-
     blink = !blink;
 
     if (blink) {
@@ -19,6 +18,52 @@ void CDM::OnTimer(int Counter) {
             disCount = 0;
         }
     }
+}
+
+void CDM::tryAutoSetStup(CFlightPlan fp, Plane flight) {
+    if (!fp.IsValid() || !fp.GetClearenceFlag() || getFlightStripInfo(fp, 10) != "1") {
+        return;
+    }
+    if (!flight.isCdmAirport || !flight.showData || (flight.tsat.length() != 4 && flight.tsat.length() != 6) ||
+        flight.tsat.find_first_not_of("0123456789") != string::npos) {
+        return;
+    }
+
+    const int tsatHours = stoi(flight.tsat.substr(0, 2));
+    const int tsatMinutes = stoi(flight.tsat.substr(2, 2));
+    if (tsatHours > 23 || tsatMinutes > 59) {
+        return;
+    }
+    const int nowMinutes = ToMinutes(GetActualTime());
+    const int difference = (nowMinutes - (tsatHours * 60 + tsatMinutes) + 2160) % 1440 - 720;
+    if (difference < -5 || difference > 6) {
+        return;
+    }
+
+    const string origin = fp.GetFlightPlanData().GetOrigin();
+    if (std::find(masterAirports.begin(), masterAirports.end(), origin) == masterAirports.end()) {
+        return;
+    }
+    if (string(fp.GetTrackingControllerCallsign()) != "" && !fp.GetTrackingControllerIsMe()) {
+        return;
+    }
+    const string groundState = fp.GetGroundState();
+    if (groundState == "STUP" || groundState == "ST-UP" || groundState == "PUSH" || groundState == "TAXI" ||
+        groundState == "DEPA") {
+        return;
+    }
+
+    setFlightStripInfo(fp, "2", 10);
+    try {
+        if (!fp.GetControllerAssignedData().SetScratchPadString("STUP")) {
+            setFlightStripInfo(fp, "1", 10);
+            return;
+        }
+    } catch (...) {
+        setFlightStripInfo(fp, "1", 10);
+        throw;
+    }
+    PushToOtherControllers(fp);
 }
 
 vector<string> CDM::splitString(const std::string& str, char delimiter) {
@@ -34,9 +79,9 @@ vector<string> CDM::splitString(const std::string& str, char delimiter) {
 }
 
 string CDM::getFlightStripInfo(CFlightPlan FlightPlan, int position) {
-    if (position >= 0 && position <= 9 && FlightPlan.IsValid()) {
-        //   0    1    2    3   4     5       6       7       8     9
-        // ASRT/TSAC/TOBT/TSAT/TTOT/deIce/ecfmpId/manualCtot/CTOC/setBy/
+    if (position >= 0 && position <= 10 && FlightPlan.IsValid()) {
+        //   0    1    2    3   4     5       6       7       8     9       10
+        // ASRT/TSAC/TOBT/TSAT/TTOT/deIce/ecfmpId/manualCtot/CTOC/setBy/autoStartup (1=armed, 2=assigned)
         string annotation = FlightPlan.GetControllerAssignedData().GetFlightStripAnnotation(0);
         vector<string> values = split(annotation, '/');
 
@@ -48,9 +93,9 @@ string CDM::getFlightStripInfo(CFlightPlan FlightPlan, int position) {
 }
 
 void CDM::setFlightStripInfo(CFlightPlan FlightPlan, string text, int position) {
-    if (position >= 0 && position <= 9 && FlightPlan.IsValid()) {
-        //   0    1    2    3   4     5       6       7       8     9
-        // ASRT/TSAC/TOBT/TSAT/TTOT/deIce/ecfmpId/manualCtot/CTOC/setBy/
+    if (position >= 0 && position <= 10 && FlightPlan.IsValid()) {
+        //   0    1    2    3   4     5       6       7       8     9       10
+        // ASRT/TSAC/TOBT/TSAT/TTOT/deIce/ecfmpId/manualCtot/CTOC/setBy/autoStartup (1=armed, 2=assigned)
         string annotation = FlightPlan.GetControllerAssignedData().GetFlightStripAnnotation(0);
         if (annotation == "") {
             annotation = "///////////";

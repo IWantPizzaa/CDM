@@ -154,6 +154,7 @@ publisher arbitration remain the responsibility of bridge consumers.
 ### CDMconfig.xml
   - Normal Visibility Operations Rate/hour (ex. rate ops="40").
   - Low Visibility Operations Rate/hour (ex. rateLvo ops="10").
+  - Default Estimated Runway Waiting Time in minutes (ex. erwt minutes="15"). This is used when a rate.txt runway entry omits ERWT. Set it to 0 to disable ERWT mode for all runways; rate.txt and runtime runway overrides are ignored until the default is positive.
   - Real Mode to calculate times automatically from the sent EOBT (**DISABLED:** realMode mode="false" and **ENABLED:** realMode mode="true").
   - Block Movement Index Mode to calculate times as "windows" (**DISABLED:** bmi mode="false" and **ENABLED:** bmi mode="true").
   - Pilot Tobt to enable/disable the automatic update of TOBT by Pilots (**DISABLED:** pilotTobt mode="false" and **ENABLED:** pilotTobt mode="true").
@@ -161,6 +162,7 @@ publisher arbitration remain the responsibility of bridge consumers.
   - Invalidate flight at tsat will invalidate flights at TSAT+6 (ex. invalidateAtTsat mode=true). By setting "asrt" it will not invalidate at TSAT+6 if ASRT is set.
   - Invalidate flight at tobt will invalidate flights at TOBT+5 (ex. invalidateAtTobt mode=true).
   - When Ready TOBT is pressed, automatically set the TSAC as the calculated TSAT (ex. readySetTsac mode=true).
+  - [OPTIONAL] Recalculate the background sequence immediately after a TOBT update and send the resulting OBT once (DISABLED by default; enable with recalculateOnTobtUpdate mode="true").
   - [OPTIONAL] Rates URL (ex. Rates url="https://........"), if no URL needed, just leave it blank (ex. Rates url="") and the file will be used.
   - [OPTIONAL] Taxizones URL (ex. Taxizones url="https://........"), if no URL needed, just leave it blank (ex. Taxizones url="") and the file will be used.
   - [OPTIONAL] Event SLOTs URL to the TXT file - Format is defined below (ex. Slot url:"https://...."), if no URL needed, just leave it blank (ex. Slots url="").
@@ -213,7 +215,7 @@ publisher arbitration remain the responsibility of bridge consumers.
 ### rate.txt
 
   Format:
-  `AIRPORT:A:ArrRwyList:NotArrRwyList:D:DepRwyList:NotDepRwyList:DependentRwyList:Rate_RateLvo`
+  `AIRPORT:A:ArrRwyList:NotArrRwyList:D:DepRwyList:NotDepRwyList:DependentRwyList:Rate_RateLvo[_ERWT]`
 
     - ArrRwyList -> Comma-separated list of runways (If more than 1, it will use if one, other or all selected). Enter * to disregard.
 
@@ -225,7 +227,7 @@ publisher arbitration remain the responsibility of bridge consumers.
 
     - DependentRwyList -> Comma-separated list of runways or dependant SIDs (from other runways). It will use the same sequence order for runways selected here. Enter * to disregard.
 
-    - Rate_RateLvo -> Normal Rate and LVO Rate. If more than one departure runways, you can define more than one rate separated by comma.
+    - `Rate_RateLvo` or `Rate_RateLvo_ERWT` -> Normal rate and LVO rate, with optional per-runway ERWT minutes. Both forms are supported. If more than one departure runway has its own rate, define one tuple per runway separated by commas. Omitting ERWT uses the CDMconfig.xml default (or the value set by `.cdm erwt`). A default ERWT of `0` disables the feature globally, so per-runway rate.txt and runtime overrides are ignored. With a positive default, an individual runway ERWT of `0` disables ERWT for that runway.
 
 
   Examples:
@@ -235,6 +237,8 @@ publisher arbitration remain the responsibility of bridge consumers.
     - `LEPA:A:24L:*:D:24L:*:26L,LOBAR%D,GRAUS%D:30_12` (1 arr runway, 2 dep runways, 26L as dependant, LOBAR%D and GRAUS%D (being 24R departures) dependant for runway 24L. 1 rate defined for all departures).
 
     - `LEPA:A:24L:24R:D:24R,24L:*:*:30_12,20_7` (1 arr runway, 1 non-arrival runway, 2 dep runway, dep runways as independant, different rates defined for both dep runways).
+
+    - `LEPA:A:24L:24R:D:24R,24L:*:*:30_12_15,20_7_10` (different normal/LVO rates and ERWT values for each departure runway).
 
     - `LEPA:A:*:*:D:*:*:*:30_12` (All departures would have the same rate, doesn't matter the selected runways).
 
@@ -405,6 +409,22 @@ Capacities:
 4- 40–49: 7
 5- 50–59: 6
 ```
+### Estimated Runway Waiting Time (ERWT)
+ERWT limits how long a departure should wait for its rate-based runway slot before it is cleared for startup. It allows aircraft to be cleared earlier and wait in the runway queue, while the rate-based TTOT remains unchanged.
+
+The departure rate determines the time spacing between aircraft:
+```
+spacing = 60 / departure rate
+estimated queue delay = rate-based TSAT - EOBT/TOBT
+startup wait = max(0, estimated queue delay - ERWT)
+```
+
+For example, at 38 departures per hour, the spacing is `60 / 38 = 1.58` minutes. With an ERWT of 15 minutes, `15 / 1.58 = 9.5`, so 9 aircraft fit within the ERWT without an additional startup wait. A 16-minute queue delay gives a 1-minute wait; an 18-minute delay gives a 3-minute wait. If the delay is 10 minutes, ERWT adds no wait, and TSAT is no earlier than now or EOBT/TOBT.
+
+The default ERWT is configured with `<erwt minutes="15"/>` in CDMconfig.xml. A default of `0` disables ERWT globally, even if rate.txt or a runtime runway override contains a positive value. With a positive default, a runway-specific rate.txt ERWT can override it; a runway-specific runtime command takes precedence over rate.txt. An ERWT of `0` for an individual runway disables ERWT for that runway.
+
+Use `.cdm erwt {minutes}` to change the default at runtime, or `.cdm erwt {icao}/{rwy} {minutes}` to set a runway-specific override. Use `.cdm erwt {icao}/{rwy} default` to remove that runtime override and return to the rate.txt value or XML default.
+
 ### BMI Window
 To open the window, use the "middle click" of your mouse of the desired airport (from the CDM airport panel):
 
@@ -480,6 +500,9 @@ As soon as departures are listed the list will be correctly displayed:
 - ``.cdm remarks`` - Toggle set TSAT to Euroscope scratchpad ON or OFF.
 - ``.cdm rmkctot`` - Toggle set CTOT to Euroscope scratchpad ON or OFF (as ".C1234).
 - ``.cdm rate`` - Updates rates values from rate.txt.
+- ``.cdm erwt {minutes}`` - Changes the default ERWT at runtime; set 0 to disable ERWT globally, regardless of runway overrides.
+- ``.cdm erwt {icao}/{rwy} {minutes}`` - Sets a runtime ERWT override for one runway. This takes precedence over rate.txt and the XML default.
+- ``.cdm erwt {icao}/{rwy} default`` - Removes that runway's runtime override and restores its rate.txt value or XML default.
 - ``.cdm flow`` - Reloads the flow data (Otherwise it's automatically reloaded every 5 min).
 - ``.cdm event`` - Toggle Event Mode ON or OFF (adds extra min to taxi time of all flights).
 - ``.cdm recover`` - In case of of CTD, it tries to recover the latest time status backed up in the server. Example: ``.cdm recover LEBL``.
@@ -523,6 +546,8 @@ As soon as departures are listed the list will be correctly displayed:
     - P: EOBT is farther than the Actual Time - 35min. TSAT, TTOT and TOBT will be showing the following character "~~" (To order them to the end of the list).
     - C: EOBT is less than 35min and TOBT hasn't expired (TOBT+6) or TSAT hasn't expired (TSAT+6).
     - I: TSAT has expired.
+
+- Column autoStartup: Add the `Auto Start-up` item and bind its click action to `Toggle Auto Start-up`. Click to enable (`S`). When checked, a cleared flight automatically receives STUP within TSAT-5 to TSAT+6 minutes (inclusive). When unchecked, no automatic startup action occurs. Applies only to flights without an existing STUP/ST-UP, PUSH, TAXI or DEPA status. Automatic assignment happens only once per activation: clearing STUP or changing TSAT alone does not rearm it, but unchecking and checking autoStartup again allows another assignment when the conditions are met. No configuration is required.
 
 - Column TSAT: It is the TTOT - the taxi time defined in the taxizones.txt, otherwise it sets 15min.
   - Functions:

@@ -50,6 +50,8 @@ CDM::CDM(void)
     RegisterTagItemType("TSAT", TAG_ITEM_TSAT);
     RegisterTagItemType("TSAT/TOBT-DIFF", TAG_ITEM_TSAT_TOBT_DIFF);
     RegisterTagItemType("TSAT-TOBT DIFF", TAG_ITEM_TSAT_DIFF_TOBT);
+    RegisterTagItemType("Auto Start-up", TAG_ITEM_AUTO_STARTUP);
+    RegisterTagItemFunction("Toggle Auto Start-up", TAG_FUNC_TOGGLE_AUTO_STARTUP);
 
     // Register Tag Item "CDM-TTOT"
     RegisterTagItemType("TTOT", TAG_ITEM_TTOT);
@@ -230,6 +232,7 @@ CDM::CDM(void)
         string invalidateTSAT_OptionStr = getFromXml("/CDM/invalidateAtTsat/@mode");
         string invalidateTOBT_OptionStr = getFromXml("/CDM/invalidateAtTobt/@mode");
         string readySetTsacOpt = getFromXml("/CDM/readySetTsac/@mode");
+        string recalculateOnTobtUpdateOpt = getFromXml("/CDM/recalculateOnTobtUpdate/@mode");
         string stringDebugMode = getFromXml("/CDM/Debug/@mode");
         vdgsFileType = getFromXml("/CDM/vdgsFileType/@type");
         ftpHost = getFromXml("/CDM/ftpHost/@host");
@@ -253,6 +256,12 @@ CDM::CDM(void)
         string disableTobtReqAfterAsrt = getFromXml("/CDM/disableTobtReqAfterAsrt/@mode");
         string loadingTextString = getFromXml("/CDM/loading/@text");
         string nonCdmEarlyClearenceColorString = getFromXml("/CDM/nonCdmEarlyClearenceColor/@minutes");
+        string erwtMinutesString = getFromXml("/CDM/erwt/@minutes");
+
+        erwtMinutes = erwtMinutesString.empty() ? 0 : stoi(erwtMinutesString);
+        if (erwtMinutes < 0) {
+            throw invalid_argument("ERWT minutes cannot be negative");
+        }
 
         if (ftpHost == "" && ftpUser == "") {
             ftpHost = "ftp.vatsimspain.es";
@@ -429,6 +438,8 @@ CDM::CDM(void)
         if (readySetTsacOpt == "false") {
             readySetTsac = false;
         }
+
+        recalculateOnTobtUpdate = recalculateOnTobtUpdateOpt == "true";
 
         remarksOptionCtot = false;
         if (remarksOptionCtotString == "true") {
@@ -659,6 +670,7 @@ CDM::~CDM() {
     // they would touch freed memory.
     waitForDetachedTasks();
     shutdownBridge();
+    restclient_.reset();
     curl_global_cleanup();
 }
 

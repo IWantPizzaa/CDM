@@ -149,6 +149,10 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                     }
                 }
 
+                if (aircraftFind && getFlightStripInfo(FlightPlan, 10) == "1") {
+                    tryAutoSetStup(FlightPlan, slotList[pos]);
+                }
+
                 // Get Taxi times
                 int TaxiTimePos = 0;
                 bool planeHasTaxiTimeAssigned = false;
@@ -866,18 +870,20 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                 double rateHour = (double)60 / rate;
                                 bool sameOrDependantRwys = false;
 
+                                // Server CTOTs are stale after a TOBT change: sequence as a normal flight, send that
+                                // TSAT to the server and only regain CTOT priority once the new CTOT comes back.
+                                const bool keepCtot = hasManualCtot && getFlightStripInfo(FlightPlan, 7) == "1";
+
                                 while (equalTTOT) {
                                     correctTTOT = true;
-                                    if (!hasManualCtot) {
-                                        if (bmiMode) {
-                                            TTOTFinal = getCorrectTTOT_Windowed(
-                                                TTOTFinal, hasManualCtot, slotList, rate, callsign, origin, depRwy,
-                                                GetActualTime() + "00", taxiTime, mySid, false);
-                                        } else {
-                                            TTOTFinal = getCorrectTTOT(TTOTFinal, hasManualCtot, slotList, rate,
-                                                                       callsign, origin, depRwy, GetActualTime() + "00",
-                                                                       taxiTime, mySid, dataRate, sameOrDependantRwys);
-                                        }
+                                    if (bmiMode) {
+                                        TTOTFinal = getCorrectTTOT_Windowed(
+                                            TTOTFinal, keepCtot, slotList, rate, callsign, origin, depRwy,
+                                            GetActualTime() + "00", taxiTime, mySid, false);
+                                    } else {
+                                        TTOTFinal = getCorrectTTOT(TTOTFinal, keepCtot, slotList, rate, callsign,
+                                                                   origin, depRwy, GetActualTime() + "00", taxiTime,
+                                                                   mySid, dataRate, sameOrDependantRwys);
                                     }
 
                                     if (correctTTOT) {
@@ -903,15 +909,15 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                         bool doRequest = false;
                                         if (aircraftFind) {
                                             if (TTOT != slotList[pos].ttot || EOBT != slotList[pos].eobt) {
-                                                Plane p(callsign, EOBT, TSAT, TTOT, slotList[pos].ctot,
-                                                        slotList[pos].flowReason, hasManualCtot, true, true);
+                                                Plane p(callsign, EOBT, TSAT, TTOT, keepCtot ? slotList[pos].ctot : "",
+                                                        keepCtot ? slotList[pos].flowReason : "", keepCtot, true, true);
                                                 doRequest = true;
                                                 slotList[pos] = p;
                                                 setFlightStripInfo(FlightPlan, p.tsat, 3);
                                                 setFlightStripInfo(FlightPlan, p.ttot, 4);
                                             }
                                         } else {
-                                            Plane p(callsign, EOBT, TSAT, TTOT, "", "", hasManualCtot, true, true);
+                                            Plane p(callsign, EOBT, TSAT, TTOT, "", "", keepCtot, true, true);
                                             doRequest = true;
                                             slotList.push_back(p);
                                             pos = getPlanePosition(callsign);
@@ -919,7 +925,13 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                             setFlightStripInfo(FlightPlan, p.ttot, 4);
                                         }
                                         // Check API
-                                        if (doRequest) {
+                                        if (doRequest && recalculateOnTobtUpdate && recalculate && tobt.length() == 4) {
+                                            if (serverEnabled) {
+                                                std::lock_guard<std::mutex> lock(pendingTobtApiUpdatesMutex);
+                                                pendingTobtApiUpdates[callsign] = "";
+                                            }
+                                            countTime = std::time(nullptr) - refreshTime - 1;
+                                        } else if (doRequest) {
                                             if (serverEnabled) {
                                                 string myTSATApi = TSAT;
                                                 // Hide calculation
@@ -1933,6 +1945,20 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                             if (!aicraftInFinalTimesList) {
                                                 p.showData = slotList[d].showData;
                                                 slotList[d] = p;
+                                                string pendingTobtApi;
+                                                {
+                                                    std::lock_guard<std::mutex> lock(pendingTobtApiUpdatesMutex);
+                                                    auto pending = pendingTobtApiUpdates.find(p.callsign);
+                                                    if (pending != pendingTobtApiUpdates.end()) {
+                                                        pendingTobtApi = pending->second;
+                                                        pendingTobtApiUpdates.erase(pending);
+                                                    }
+                                                }
+                                                if (!pendingTobtApi.empty() && serverEnabled) {
+                                                    slotList[d].showData = false;
+                                                    runDetachedTask(&CDM::setOBTApi, p.callsign, pendingTobtApi, false,
+                                                                    false);
+                                                }
                                             } else if (atotEnabled) {
                                                 slotList[d].ttot = p.ttot;
                                             }
@@ -3514,6 +3540,15 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                     *pRGB = ItemRGB;
                 }
             }
+        }
+
+        if (ItemCode == TAG_ITEM_AUTO_STARTUP) {
+            const string autoStartup = getFlightStripInfo(FlightPlan, 10);
+            const bool enabled = autoStartup == "1" || autoStartup == "2";
+            strcpy_s(sItemString, 16, enabled ? "S" : "");
+            ItemRGB = enabled ? TAG_GREEN : TAG_GREY;
+            *pColorCode = TAG_COLOR_RGB_DEFINED;
+            *pRGB = ItemRGB;
         }
 
         // Refresh the display cache with this call's finished result for reuse within the same second.
