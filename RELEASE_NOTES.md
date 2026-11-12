@@ -1,4 +1,31 @@
-# CDM 2.31.6b
+# CDM 2.31.7b
+
+Windows x86 (32-bit) beta for EuroScope, integrating the three official updates
+through `rpuig2001/CDM` commit `a9d55b2b` after the previous 2.31.6b release.
+This fork uses 2.31.7b to distinguish this build; upstream still reports 2.31.6b.
+
+## Changes since 2.31.6b
+
+- Renamed ERWT to Runway Pressure, including XML configuration, rate values,
+  and runtime commands.
+- Refreshed flight times even when flights are outside the CDM display window.
+- Integrated the official runway sequencing changes from `a9d55b2b`.
+- Preserved authenticated vIFF builds, the EuroScope Plugin Bridge and its
+  timer, and the fork's CTOT delay behavior.
+
+## Configuration migration
+
+If you enabled ERWT in the previous beta, replace `<erwt minutes="15"/>` with
+`<runwayPressure minutes="15"/>` and use `.cdm runwaypressure` instead of
+`.cdm erwt`. Set `.cdm runwaypressure -1` to disable pressure globally.
+A default of zero now permits positive per-runway values from `rate.txt` or
+runtime overrides; omitted runway values use the default. The optional third
+value in each `rate.txt` tuple retains its position.
+
+Replace only the Release `CDM.dll` and keep your other local configuration.
+The bundled XML is unchanged from 2.30.3 and contains no ERWT setting.
+
+## Previous release: 2.31.6b
 
 Windows x86 (32-bit) plugin sources for EuroScope, integrating all 19 official
 commits since 2.30.3 through `rpuig2001/CDM` commit `b5a26bff` (12 November 2026).

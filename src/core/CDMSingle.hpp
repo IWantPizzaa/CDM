@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #pragma warning(push, 0)
 #include "EuroScopePlugIn.h"
 #pragma warning(pop)
@@ -51,7 +51,7 @@
 #endif
 
 #define MY_PLUGIN_NAME "CDM Plugin"
-#define MY_PLUGIN_VERSION "2.31.6b"
+#define MY_PLUGIN_VERSION "2.31.7b"
 #define MY_PLUGIN_DEVELOPER "Roger Puig"
 #define MY_PLUGIN_COPYRIGHT "GPL v3"
 #define MY_PLUGIN_VIEW_AVISO "Euroscope CDM"
@@ -421,6 +421,8 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     void refreshMasterAirports();
 
+    void refreshFlightTimes();
+
     void refreshActions4();
 
     bool setMasterAirport(string airport, string position);
@@ -455,6 +457,7 @@ class CDM : public EuroScopePlugIn::CPlugIn {
     void shutdownBridge();
 
     std::shared_ptr<interfaces::IRestClient> restclient_;
+    std::chrono::steady_clock::time_point lastFlightTimesRefresh_{};
 
     std::size_t activeAsyncTasks_ = 0;
     bool shuttingDown_ = false;
