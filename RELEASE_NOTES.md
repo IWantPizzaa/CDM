@@ -1,3 +1,14 @@
+# Unreleased
+
+- Integrated official commits `70c84e3f` and `75d0c535`.
+- Runway Pressure now defaults to `-1` (globally disabled) when the XML setting
+  is absent.
+- For CTOT flights, startup advance now uses the average planned runway wait
+  of nearby non-CTOT departures sharing the runway or a dependent runway/SID,
+  capped by the configured pressure. Time comparisons handle midnight.
+- Preserved the fork's API authentication, EuroScope Plugin Bridge, and CTOT
+  delay exclusions. No release or version bump accompanies this source update.
+
 # CDM 2.31.7b
 
 Windows x86 (32-bit) beta for EuroScope, integrating the three official updates
