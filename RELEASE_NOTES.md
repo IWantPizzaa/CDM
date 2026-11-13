@@ -1,4 +1,8 @@
-# Unreleased
+# CDM 2.31.8b
+
+Windows x86 (32-bit) beta for EuroScope, based on official commit `75d0c535`.
+
+## Changes since 2.31.7b
 
 - Integrated official commits `70c84e3f` and `75d0c535`.
 - Runway Pressure now defaults to `-1` (globally disabled) when the XML setting
@@ -7,7 +11,12 @@
   of nearby non-CTOT departures sharing the runway or a dependent runway/SID,
   capped by the configured pressure. Time comparisons handle midnight.
 - Preserved the fork's API authentication, EuroScope Plugin Bridge, and CTOT
-  delay exclusions. No release or version bump accompanies this source update.
+  delay exclusions.
+
+Replace only the Release `CDM.dll` and keep your local configuration. The
+bundled XML is unchanged from 2.30.3. To enable pressure, add
+`<runwayPressure minutes="15"/>` inside `<CDM>` or use `.cdm runwaypressure 15`.
+Use `-1` to disable pressure globally.
 
 # CDM 2.31.7b
 
