@@ -2,6 +2,7 @@
 #include "src/core/CDMGlobals.hpp"
 
 #define ESB_CLIENT_SHIM
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <unordered_set>
@@ -22,6 +23,7 @@ enum CdmBridgeField {
     BRIDGE_FLOW_RESTRICTION,
     BRIDGE_ECFMP_RESTRICTION,
     BRIDGE_MANUAL_CTOT,
+    BRIDGE_PM_SENT,
     BRIDGE_FIELD_COUNT
 };
 
@@ -44,6 +46,8 @@ const ESB_FieldDecl kCdmBridgeFields[] = {
     {"ecfmp_restriction", ESB_T_STR, ESB_SCOPE_AIRCRAFT, ESB_F_SYNC, 64,
      "ECFMP restriction identifier associated with the CDM slot"},
     {"manual_ctot", ESB_T_BOOL, ESB_SCOPE_AIRCRAFT, ESB_F_SYNC, 0, "True when the CTOT was assigned manually"},
+    {"pm_sent", ESB_T_BOOL, ESB_SCOPE_AIRCRAFT, ESB_F_SYNC, 0,
+     "True when the CDM private message (S) has been sent to the pilot"},
 };
 
 ESB_Provider* bridgeProvider = nullptr;
@@ -127,7 +131,7 @@ void CDM::updateBridge() {
         declaration.struct_size = sizeof declaration;
         declaration.provider_id = "com.viffsys.cdm";
         declaration.schema_major = 1;
-        declaration.schema_minor = 0;
+        declaration.schema_minor = 1;
         declaration.display_name = "CDM Plugin";
         declaration.contact = "https://github.com/IWantPizzaa/CDM";
         declaration.fields = kCdmBridgeFields;
@@ -181,6 +185,10 @@ void CDM::updateBridge() {
 
         ESB_Value manualCtot = ESB_Bool(plane.hasManualCtot);
         api->set_ac(bridgeProvider, aircraft, bridgeFieldIds[BRIDGE_MANUAL_CTOT], &manualCtot);
+
+        const bool pmSent = find(messagesSent.begin(), messagesSent.end(), plane.callsign) != messagesSent.end();
+        ESB_Value pmSentValue = ESB_Bool(pmSent);
+        api->set_ac(bridgeProvider, aircraft, bridgeFieldIds[BRIDGE_PM_SENT], &pmSentValue);
     }
 
     for (const string& callsign : bridgePublishedCallsigns) {
