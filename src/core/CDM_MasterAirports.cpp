@@ -23,6 +23,7 @@ void CDM::refreshMasterAirports() {
     {
         std::lock_guard<std::mutex> lock(pendingMasterAirportsMutex);
         if (hasPendingMasterAirports) {
+            syncedMasterAirports = pendingMasterAirports;
             airports.swap(pendingMasterAirports);
             hasPendingMasterAirports = false;
             updateMasterAirports = serverEnabled;
