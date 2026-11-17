@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <ctime>
+#include <map>
+#include <set>
 #include <unordered_set>
 
 #include "esbridge.h"
@@ -24,6 +27,7 @@ enum CdmBridgeField {
     BRIDGE_ECFMP_RESTRICTION,
     BRIDGE_MANUAL_CTOT,
     BRIDGE_PM_SENT,
+    BRIDGE_AIRPORTS,  // global scope; every field above is aircraft scope
     BRIDGE_FIELD_COUNT
 };
 
@@ -48,12 +52,15 @@ const ESB_FieldDecl kCdmBridgeFields[] = {
     {"manual_ctot", ESB_T_BOOL, ESB_SCOPE_AIRCRAFT, ESB_F_SYNC, 0, "True when the CTOT was assigned manually"},
     {"pm_sent", ESB_T_BOOL, ESB_SCOPE_AIRCRAFT, ESB_F_SYNC, 0,
      "True when the CDM private message (S) has been sent to the pilot"},
+    {"airports", ESB_T_STR, ESB_SCOPE_GLOBAL, ESB_F_SYNC, 65536,
+     "JSON by ICAO: master, lvo, rates, startupDelays, departureDelays, runwayPressure"},
 };
 
 ESB_Provider* bridgeProvider = nullptr;
 ESB_FieldId bridgeFieldIds[BRIDGE_FIELD_COUNT] = {};
 bool bridgeRegistrationConflict = false;
 unordered_set<string> bridgePublishedCallsigns;
+string bridgePublishedAirports;
 
 bool bridgeTimeToMinutes(const string& text, int64_t& result) {
     if (text.empty()) return false;
@@ -101,8 +108,8 @@ void bridgeSetString(ESB_Aircraft aircraft, CdmBridgeField field, const string& 
 }
 
 void bridgeClearAircraft(ESB_Aircraft aircraft) {
-    for (ESB_FieldId field : bridgeFieldIds) {
-        if (field != ESB_FIELD_NONE) esb_api->clear_ac(bridgeProvider, aircraft, field);
+    for (int index = 0; index < BRIDGE_AIRPORTS; ++index) {
+        if (bridgeFieldIds[index] != ESB_FIELD_NONE) esb_api->clear_ac(bridgeProvider, aircraft, bridgeFieldIds[index]);
     }
 }
 
@@ -111,6 +118,130 @@ string findCallsignValue(const vector<vector<string>>& values, const string& cal
         if (value.size() >= 2 && value[0] == callsign) return value[1];
     }
     return "";
+}
+
+// stoi, as CDM reads its rate values, keeping only non-negative values.
+bool bridgeParseInt(const string& text, int& result) {
+    try {
+        result = stoi(text);
+        return result >= 0;
+    } catch (...) {
+        return false;
+    }
+}
+
+// Active departure runways per airport from the sector file, rescanned every 5 s like rateForRunway.
+const std::map<string, std::set<string>>& bridgeActiveDepartureRunways(CDM& cdm) {
+    static std::map<string, std::set<string>> runways;
+    static time_t scannedAt = 0;
+    const time_t now = std::time(nullptr);
+    if (now - scannedAt <= 5) return runways;
+    scannedAt = now;
+
+    runways.clear();
+    for (CSectorElement runway = cdm.SectorFileElementSelectFirst(SECTOR_ELEMENT_RUNWAY); runway.IsValid();
+         runway = cdm.SectorFileElementSelectNext(runway, SECTOR_ELEMENT_RUNWAY)) {
+        const string airport = runway.GetAirportName();
+        if (airport.size() < 4) continue;
+        for (int end = 0; end < 2; ++end) {
+            if (runway.IsElementActive(true, end)) runways[airport.substr(0, 4)].insert(runway.GetRunwayName(end));
+        }
+    }
+    return runways;
+}
+
+// The rate and runway pressure CDM applies to a departure runway (same rules as refreshTimes).
+void bridgeRunwayValues(CDM& cdm, const string& airport, const string& runway, Json::Value& rates,
+                        Json::Value& pressures) {
+    const Rate dataRate = cdm.rateForRunway(airport, runway, "");
+    size_t position = 0;
+    string rateText;
+    if (dataRate.airport == "-1") {
+        rateText = lvo ? lvoRateString : rateString;
+    } else {
+        if (dataRate.rates.size() > 1) {
+            for (size_t index = 0; index < dataRate.depRwyYes.size(); ++index) {
+                if (dataRate.depRwyYes[index] == runway) position = index;
+            }
+        }
+        const vector<string>& values = lvo ? dataRate.ratesLvo : dataRate.rates;
+        if (position < values.size()) rateText = values[position];
+    }
+    int value = 0;
+    if (bridgeParseInt(rateText, value)) rates[runway] = value;
+
+    if (runwayPressureMinutes < 0) return;  // disabled
+    int pressure = runwayPressureMinutes;
+    if (position < dataRate.ratesRunwayPressure.size() &&
+        bridgeParseInt(dataRate.ratesRunwayPressure[position], value)) {
+        pressure = value;
+    }
+    string key = airport + "/" + runway;
+    std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return static_cast<char>(toupper(c)); });
+    {
+        std::lock_guard<std::mutex> lock(runwayPressureOverridesMutex);
+        const auto found = runwayPressureOverrides.find(key);
+        if (found != runwayPressureOverrides.end()) pressure = found->second;
+    }
+    pressures[runway] = pressure;
+}
+
+// The "airports" field: one object per airport CDM knows, keyed by ICAO; "" when there is none.
+string bridgeAirportsJson(CDM& cdm) {
+    std::set<string> airports(CDMairports.begin(), CDMairports.end());
+    airports.insert(masterAirports.begin(), masterAirports.end());
+    for (const Delay& delay : delayList) airports.insert(delay.airport);
+    if (serverEnabled) {
+        for (const auto& master : syncedMasterAirports) {
+            if (master.size() >= 2 && !master[1].empty()) airports.insert(master[0]);
+        }
+    }
+    airports.erase("");
+    if (airports.empty()) return "";
+
+    CController myself = cdm.ControllerMyself();
+    const string myCallsign = myself.IsValid() && myself.IsController() ? myself.GetCallsign() : "";
+    const auto& activeRunways = bridgeActiveDepartureRunways(cdm);
+
+    Json::Value root(Json::objectValue);
+    for (const string& airport : airports) {
+        Json::Value entry(Json::objectValue);
+
+        string master;
+        if (std::find(masterAirports.begin(), masterAirports.end(), airport) != masterAirports.end()) {
+            master = myCallsign;
+        } else if (serverEnabled) {
+            for (const auto& synced : syncedMasterAirports) {
+                if (synced.size() >= 2 && synced[0] == airport) master = synced[1];
+            }
+        }
+        entry["master"] = master.empty() ? Json::Value(Json::nullValue) : Json::Value(master);
+        entry["lvo"] = lvo;
+
+        Json::Value rates(Json::objectValue), pressures(Json::objectValue);
+        const auto runways = activeRunways.find(airport);
+        if (runways != activeRunways.end()) {
+            for (const string& runway : runways->second) bridgeRunwayValues(cdm, airport, runway, rates, pressures);
+        }
+
+        Json::Value startup(Json::objectValue), departure(Json::objectValue);
+        for (const Delay& delay : delayList) {
+            int64_t minutes = 0;
+            if (delay.airport != airport || delay.rwy.empty() || !bridgeTimeToMinutes(delay.time, minutes)) continue;
+            if (delay.type == "tsat") startup[delay.rwy] = static_cast<Json::Int64>(minutes);
+            if (delay.type == "ttot") departure[delay.rwy] = static_cast<Json::Int64>(minutes);
+        }
+
+        entry["rates"] = rates;
+        entry["startupDelays"] = startup;
+        entry["departureDelays"] = departure;
+        entry["runwayPressure"] = pressures;
+        root[airport] = entry;
+    }
+
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "";
+    return Json::writeString(writer, root);
 }
 
 string findAsat(const string& callsign) {
@@ -131,7 +262,7 @@ void CDM::updateBridge() {
         declaration.struct_size = sizeof declaration;
         declaration.provider_id = "com.viffsys.cdm";
         declaration.schema_major = 1;
-        declaration.schema_minor = 1;
+        declaration.schema_minor = 2;
         declaration.display_name = "CDM Plugin";
         declaration.contact = "https://github.com/IWantPizzaa/CDM";
         declaration.fields = kCdmBridgeFields;
@@ -155,6 +286,19 @@ void CDM::updateBridge() {
                 return;
             }
         }
+        bridgePublishedAirports.clear();
+    }
+
+    const string airports = bridgeAirportsJson(*this);
+    if (airports != bridgePublishedAirports) {
+        ESB_Value value = ESB_Str(airports.c_str());
+        if (airports.empty()) {
+            api->clear_global(bridgeProvider, bridgeFieldIds[BRIDGE_AIRPORTS]);
+        } else if (api->set_global(bridgeProvider, bridgeFieldIds[BRIDGE_AIRPORTS], &value) != ESB_OK) {
+            api->clear_global(bridgeProvider, bridgeFieldIds[BRIDGE_AIRPORTS]);
+            addLogLine("ERROR: Failed to publish the CDM airports on the EuroScope Plugin Bridge");
+        }
+        bridgePublishedAirports = airports;
     }
 
     unordered_set<string> publishedThisTick;
@@ -205,4 +349,5 @@ void CDM::shutdownBridge() {
     bridgeProvider = nullptr;
     fill(begin(bridgeFieldIds), end(bridgeFieldIds), ESB_FIELD_NONE);
     bridgePublishedCallsigns.clear();
+    bridgePublishedAirports.clear();
 }

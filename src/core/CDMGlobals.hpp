@@ -167,6 +167,8 @@ inline vector<vector<string>> serverMasterAirports;
 inline std::mutex pendingMasterAirportsMutex;
 inline vector<vector<string>> pendingMasterAirports;
 inline bool hasPendingMasterAirports = false;
+// Main-thread copy of the last vIFF master list ({icao, position}), for the bridge.
+inline vector<vector<string>> syncedMasterAirports;
 inline vector<string> CDMairports;
 inline vector<string> CTOTcheck;
 inline vector<string> finalTimesList;

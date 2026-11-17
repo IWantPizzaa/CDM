@@ -32,7 +32,18 @@ The aircraft-scoped schema publishes TOBT, TSAT, TTOT, CTOT, TSAC, ASRT, ASAT,
 de-icing state, TOBT source, flow restriction information, and whether the
 CTOT is manual. The ECFMP restriction field remains in the schema for older
 consumers but is empty in version 2.30 because upstream removed ECFMP data.
-Times are signed 64-bit minutes since midnight UTC. Fields are
+Times are signed 64-bit minutes since midnight UTC.
+
+Since schema 1.2, the global `airports` field holds compact JSON keyed by ICAO
+for every airport CDM knows (rate file, master airports, delays, vIFF masters):
+`{"LFPG":{"master":"LFPG_DEL","lvo":false,"rates":{"26R":30},"startupDelays":{"26R":605},"departureDelays":{},"runwayPressure":{"26R":10}}}`.
+`master` is the CDM master position (this controller when it is master,
+otherwise the vIFF one) or `null`; `rates` are the hourly rates applied to the
+active departure runways (LVO rates while LVO is on); delays are the start
+times, in minutes since midnight UTC, of the `.cdm startupdelay` and
+`.cdm departuredelay` commands; `runwayPressure` gives the minutes applied per
+active departure runway and is empty while Runway Pressure is disabled. The
+field is unset when CDM knows no airport. Fields are
 eligible for the bridge's opt-in remote relay; relay configuration and remote
 publisher arbitration remain the responsibility of bridge consumers.
 
