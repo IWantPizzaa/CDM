@@ -79,9 +79,9 @@ vector<string> CDM::splitString(const std::string& str, char delimiter) {
 }
 
 string CDM::getFlightStripInfo(CFlightPlan FlightPlan, int position) {
-    if (position >= 0 && position <= 10 && FlightPlan.IsValid()) {
-        //   0    1    2    3   4     5       6       7       8     9       10
-        // ASRT/TSAC/TOBT/TSAT/TTOT/deIce/ecfmpId/manualCtot/CTOC/setBy/autoStartup (1=armed, 2=assigned)
+    if (position >= 0 && position <= 11 && FlightPlan.IsValid()) {
+        //   0    1    2    3   4     5       6       7       8     9       10                             11
+        // ASRT/TSAC/TOBT/TSAT/TTOT/deIce/ecfmpId/manualCtot/CTOC/setBy/autoStartup (1=armed, 2=assigned)/released
         string annotation = FlightPlan.GetControllerAssignedData().GetFlightStripAnnotation(0);
         vector<string> values = split(annotation, '/');
 
@@ -93,9 +93,9 @@ string CDM::getFlightStripInfo(CFlightPlan FlightPlan, int position) {
 }
 
 void CDM::setFlightStripInfo(CFlightPlan FlightPlan, string text, int position) {
-    if (position >= 0 && position <= 10 && FlightPlan.IsValid()) {
-        //   0    1    2    3   4     5       6       7       8     9       10
-        // ASRT/TSAC/TOBT/TSAT/TTOT/deIce/ecfmpId/manualCtot/CTOC/setBy/autoStartup (1=armed, 2=assigned)
+    if (position >= 0 && position <= 11 && FlightPlan.IsValid()) {
+        //   0    1    2    3   4     5       6       7       8     9       10                             11
+        // ASRT/TSAC/TOBT/TSAT/TTOT/deIce/ecfmpId/manualCtot/CTOC/setBy/autoStartup (1=armed, 2=assigned)/released
         string annotation = FlightPlan.GetControllerAssignedData().GetFlightStripAnnotation(0);
         if (annotation == "") {
             annotation = "///////////";

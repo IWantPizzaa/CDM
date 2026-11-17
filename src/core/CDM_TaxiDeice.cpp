@@ -35,6 +35,7 @@ void CDM::deleteFlightStrips(string callsign) {
             setFlightStripInfo(fp, "", 2);
             setFlightStripInfo(fp, "", 3);
             setFlightStripInfo(fp, "", 4);
+            setFlightStripInfo(fp, "", 11);
         }
     } catch (const std::exception& e) {
         addLogLine("ERROR: Unhandled exception deleteFlightStrips: " + (string)e.what());

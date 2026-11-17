@@ -216,16 +216,19 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
                  FunctionId == TAG_FUNC_TOGGLEASRTREA) {
             if (master && AtcMe) {
                 addLogLine("TRIGGER - TAG_FUNC_READYSTARTUP");
-                string annotAsrt = getFlightStripInfo(fp, 0);
-                if (annotAsrt.empty()) {
+                // Ready Start-up (RSTUP) is the release to ground (position 11); ASRT (position 0) stays the
+                // pilot's start-up request.
+                const int stripPosition = FunctionId == TAG_FUNC_READYSTARTUP ? 11 : 0;
+                string annotation = getFlightStripInfo(fp, stripPosition);
+                if (annotation.empty()) {
                     string timeNow = GetActualTime();
 
-                    setFlightStripInfo(fp, timeNow, 0);
+                    setFlightStripInfo(fp, timeNow, stripPosition);
                     if (FunctionId == TAG_FUNC_TOGGLEASRTREA) {
                         runDetachedTask(&CDM::setCdmSts, fp.GetCallsign(), "REA/1");
                     }
                 } else {
-                    setFlightStripInfo(fp, "", 0);
+                    setFlightStripInfo(fp, "", stripPosition);
                 }
             }
         }
@@ -460,9 +463,9 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
                 AddPopupListElement("Edit TSAC", "", TAG_FUNC_EDITTSAC, false, 2, false);
                 AddPopupListElement("----------------", "", -1, false, 2, false);
 
-                // ASRT OPTIONS
-                string asrtvalue = getFlightStripInfo(fp, 0);
-                if (asrtvalue.empty()) {
+                // RSTUP OPTIONS
+                string releasedValue = getFlightStripInfo(fp, 11);
+                if (releasedValue.empty()) {
                     AddPopupListElement("Set RSTUP State", "", TAG_FUNC_READYSTARTUP, false, 2, false);
                 } else {
                     AddPopupListElement("Remove RSTUP State", "", TAG_FUNC_READYSTARTUP, false, 2, false);
@@ -1036,6 +1039,7 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
                     } else if (editedTOBT.empty() && master && AtcMe) {
                         setFlightStripInfo(fp, "", 0);
                         setFlightStripInfo(fp, "", 2);
+                        setFlightStripInfo(fp, "", 11);
                         for (size_t i = 0; i < slotList.size(); i++) {
                             if ((string)fp.GetCallsign() == slotList[i].callsign) {
                                 slotList.erase(slotList.begin() + i);

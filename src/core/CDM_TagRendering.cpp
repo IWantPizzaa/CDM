@@ -1067,6 +1067,7 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                 if (oldTOBT && !getTTOT.empty() && invalidateTOBT_Option) {
                                     OutOfTsat.push_back({callsign, EOBT, aircraftFind ? TSAT : ""});
                                     setFlightStripInfo(FlightPlan, "", 0);
+                                    setFlightStripInfo(FlightPlan, "", 11);
                                     setFlightStripInfo(FlightPlan, "", 3);
                                     setFlightStripInfo(FlightPlan, "", 4);
                                     // Update CDM-API
@@ -1151,6 +1152,7 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                 ((invalidateTSAT_Option_asrt && ASRTtext.empty()) || (!invalidateTSAT_Option_asrt))) {
                                 OutOfTsat.push_back({callsign, EOBT, aircraftFind ? TSAT : ""});
                                 setFlightStripInfo(FlightPlan, "", 0);
+                                setFlightStripInfo(FlightPlan, "", 11);
                                 setFlightStripInfo(FlightPlan, "", 3);
                                 setFlightStripInfo(FlightPlan, "", 4);
 
@@ -1167,6 +1169,7 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                             myNetworkStatus[i][1].find("CDM") == string::npos) {
                                             OutOfTsat.push_back({callsign, EOBT, aircraftFind ? TSAT : ""});
                                             setFlightStripInfo(FlightPlan, "", 0);
+                                            setFlightStripInfo(FlightPlan, "", 11);
                                             setFlightStripInfo(FlightPlan, "", 3);
                                             setFlightStripInfo(FlightPlan, "", 4);
                                         }
@@ -1723,8 +1726,8 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                     strcpy_s(sItemString, 16, " ");
                                 }
                             } else if (ItemCode == TAG_ITEM_READYSTARTUP) {
-                                string ASRTtext = getFlightStripInfo(FlightPlan, 0);
-                                if (!ASRTtext.empty()) {
+                                string releasedText = getFlightStripInfo(FlightPlan, 11);
+                                if (!releasedText.empty()) {
                                     ItemRGB = TAG_GREEN;
                                     strcpy_s(sItemString, 16, "RSTUP");
                                 } else {
@@ -2641,8 +2644,8 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                     strcpy_s(sItemString, 16, " ");
                                 }
                             } else if (ItemCode == TAG_ITEM_READYSTARTUP) {
-                                string ASRTtext = getFlightStripInfo(FlightPlan, 0);
-                                if (!ASRTtext.empty()) {
+                                string releasedText = getFlightStripInfo(FlightPlan, 11);
+                                if (!releasedText.empty()) {
                                     ItemRGB = TAG_GREEN;
                                     strcpy_s(sItemString, 16, "RSTUP");
                                 } else {

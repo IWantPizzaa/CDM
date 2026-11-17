@@ -34,6 +34,11 @@ CTOT is manual. The ECFMP restriction field remains in the schema for older
 consumers but is empty in version 2.30 because upstream removed ECFMP data.
 Times are signed 64-bit minutes since midnight UTC.
 
+Since schema 1.3, `released` holds the time the flight was released to ground
+with Ready Start-up (RSTUP) and is unset while it is not released. `asrt` keeps
+its CDM meaning, the pilot's start-up request (vIFF ready request or
+``Toggle ASRT``), and no longer follows RSTUP.
+
 Since schema 1.2, the global `airports` field holds compact JSON keyed by ICAO
 for every airport CDM knows (rate file, master airports, delays, vIFF masters):
 `{"LFPG":{"master":"LFPG_DEL","lvo":false,"rates":{"26R":30},"startupDelays":{"26R":605},"departureDelays":{},"runwayPressure":{"26R":10}}}`.
@@ -619,13 +624,13 @@ As soon as departures are listed the list will be correctly displayed:
 
 - Column ASRT: It shows the requested StartUp time, It can be added to the list with the toggle function or sending a REA Msg.
   - Functions:
-    - ``Toggle ASRT`` -> Sets RSTUP/ASRT or removes it if already set.
+    - ``Toggle ASRT`` -> Sets ASRT or removes it if already set.
   - Colors:
     - ``color10`` -> Default.
   
-- Column Ready Start-up: It shows if the plane is Ready for Start-up or not together with the ASRT. (ASRT and Ready Start-up do the same, but this column is a way to represent the real "ready start-up" state from IRL because Euroscope doesn't have this state).
+- Column Ready Start-up: It shows if the plane has been released to ground (Ready Start-up), the real "ready start-up" state from IRL because Euroscope doesn't have this state. It is separate from the ASRT, the pilot's start-up request: setting one does not set the other. Like the ASRT, it is shared with the other controllers and removed when the TOBT or TSAT is invalidated or the TOBT is removed.
   - Functions:
-    - ``Toggle Ready Start-up function`` -> Sets RSTUP/ASRT or removes it if already set.
+    - ``Toggle Ready Start-up function`` -> Sets RSTUP or removes it if already set (ASRT unchanged).
   - Colors:
     - ![#00c000](https://img.shields.io/badge/-00c000) ``GREEN`` -> RSTUP is set.
     - ![#BE0000](https://img.shields.io/badge/-BE0000) ``RED`` -> RSUP is NOT set.

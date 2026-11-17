@@ -27,6 +27,7 @@ enum CdmBridgeField {
     BRIDGE_ECFMP_RESTRICTION,
     BRIDGE_MANUAL_CTOT,
     BRIDGE_PM_SENT,
+    BRIDGE_RELEASED,
     BRIDGE_AIRPORTS,  // global scope; every field above is aircraft scope
     BRIDGE_FIELD_COUNT
 };
@@ -52,6 +53,8 @@ const ESB_FieldDecl kCdmBridgeFields[] = {
     {"manual_ctot", ESB_T_BOOL, ESB_SCOPE_AIRCRAFT, ESB_F_SYNC, 0, "True when the CTOT was assigned manually"},
     {"pm_sent", ESB_T_BOOL, ESB_SCOPE_AIRCRAFT, ESB_F_SYNC, 0,
      "True when the CDM private message (S) has been sent to the pilot"},
+    {"released", ESB_T_I64, ESB_SCOPE_AIRCRAFT, ESB_F_SYNC, 0,
+     "Ready start-up (release to ground) time, minutes since midnight UTC"},
     {"airports", ESB_T_STR, ESB_SCOPE_GLOBAL, ESB_F_SYNC, 65536,
      "JSON by ICAO: master, lvo, rates, startupDelays, departureDelays, runwayPressure"},
 };
@@ -262,7 +265,7 @@ void CDM::updateBridge() {
         declaration.struct_size = sizeof declaration;
         declaration.provider_id = "com.viffsys.cdm";
         declaration.schema_major = 1;
-        declaration.schema_minor = 2;
+        declaration.schema_minor = 3;
         declaration.display_name = "CDM Plugin";
         declaration.contact = "https://github.com/IWantPizzaa/CDM";
         declaration.fields = kCdmBridgeFields;
@@ -314,6 +317,7 @@ void CDM::updateBridge() {
         const string tsac = flightPlan.IsValid() ? getFlightStripInfo(flightPlan, 1) : "";
         const string asrt = flightPlan.IsValid() ? getFlightStripInfo(flightPlan, 0) : "";
         const string tobtSetBy = flightPlan.IsValid() ? getFlightStripInfo(flightPlan, 9) : "";
+        const string released = flightPlan.IsValid() ? getFlightStripInfo(flightPlan, 11) : "";
 
         bridgeSetTime(aircraft, BRIDGE_TOBT, tobt);
         bridgeSetTime(aircraft, BRIDGE_TSAT, plane.tsat);
@@ -322,6 +326,7 @@ void CDM::updateBridge() {
         bridgeSetTime(aircraft, BRIDGE_TSAC, tsac == "9999" ? "" : tsac);
         bridgeSetTime(aircraft, BRIDGE_ASRT, asrt);
         bridgeSetTime(aircraft, BRIDGE_ASAT, findAsat(plane.callsign));
+        bridgeSetTime(aircraft, BRIDGE_RELEASED, released);
         bridgeSetString(aircraft, BRIDGE_DEICE, findCallsignValue(deiceList, plane.callsign));
         bridgeSetString(aircraft, BRIDGE_TOBT_SET_BY, tobtSetBy);
         bridgeSetString(aircraft, BRIDGE_FLOW_RESTRICTION, plane.flowReason);
