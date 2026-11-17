@@ -37,7 +37,8 @@ Times are signed 64-bit minutes since midnight UTC.
 Since schema 1.3, `released` holds the time the flight was released to ground
 with Ready Start-up (RSTUP) and is unset while it is not released. `asrt` keeps
 its CDM meaning, the pilot's start-up request (vIFF ready request or
-``Toggle ASRT``), and no longer follows RSTUP.
+``Toggle ASRT``). A released flight always has an ASRT: RSTUP also sets the
+ASRT when it is empty, and removing the ASRT removes the release.
 
 Since schema 1.2, the global `airports` field holds compact JSON keyed by ICAO
 for every airport CDM knows (rate file, master airports, delays, vIFF masters):
@@ -624,13 +625,13 @@ As soon as departures are listed the list will be correctly displayed:
 
 - Column ASRT: It shows the requested StartUp time, It can be added to the list with the toggle function or sending a REA Msg.
   - Functions:
-    - ``Toggle ASRT`` -> Sets ASRT or removes it if already set.
+    - ``Toggle ASRT`` -> Sets ASRT or removes it if already set (removing it also removes RSTUP).
   - Colors:
     - ``color10`` -> Default.
   
-- Column Ready Start-up: It shows if the plane has been released to ground (Ready Start-up), the real "ready start-up" state from IRL because Euroscope doesn't have this state. It is separate from the ASRT, the pilot's start-up request: setting one does not set the other. Like the ASRT, it is shared with the other controllers and removed when the TOBT or TSAT is invalidated or the TOBT is removed.
+- Column Ready Start-up: It shows if the plane has been released to ground (Ready Start-up), the real "ready start-up" state from IRL because Euroscope doesn't have this state. It is separate from the ASRT, the pilot's start-up request, but a released flight always has an ASRT. Like the ASRT, it is shared with the other controllers and removed when the TOBT or TSAT is invalidated or the TOBT is removed.
   - Functions:
-    - ``Toggle Ready Start-up function`` -> Sets RSTUP or removes it if already set (ASRT unchanged).
+    - ``Toggle Ready Start-up function`` -> Sets RSTUP, and the ASRT if the flight was not ready yet, or removes RSTUP if already set (the ASRT stays).
   - Colors:
     - ![#00c000](https://img.shields.io/badge/-00c000) ``GREEN`` -> RSTUP is set.
     - ![#BE0000](https://img.shields.io/badge/-BE0000) ``RED`` -> RSUP is NOT set.

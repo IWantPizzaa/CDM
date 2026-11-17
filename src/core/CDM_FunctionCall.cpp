@@ -217,18 +217,24 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
             if (master && AtcMe) {
                 addLogLine("TRIGGER - TAG_FUNC_READYSTARTUP");
                 // Ready Start-up (RSTUP) is the release to ground (position 11); ASRT (position 0) stays the
-                // pilot's start-up request.
+                // pilot's start-up request. A released flight always has an ASRT.
                 const int stripPosition = FunctionId == TAG_FUNC_READYSTARTUP ? 11 : 0;
                 string annotation = getFlightStripInfo(fp, stripPosition);
                 if (annotation.empty()) {
                     string timeNow = GetActualTime();
 
                     setFlightStripInfo(fp, timeNow, stripPosition);
+                    if (stripPosition == 11 && getFlightStripInfo(fp, 0).empty()) {
+                        setFlightStripInfo(fp, timeNow, 0);
+                    }
                     if (FunctionId == TAG_FUNC_TOGGLEASRTREA) {
                         runDetachedTask(&CDM::setCdmSts, fp.GetCallsign(), "REA/1");
                     }
                 } else {
                     setFlightStripInfo(fp, "", stripPosition);
+                    if (stripPosition == 0) {
+                        setFlightStripInfo(fp, "", 11);
+                    }
                 }
             }
         }
