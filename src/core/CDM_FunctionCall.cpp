@@ -5,6 +5,7 @@
 
 #include "CDMSingle.hpp"
 #include "src/core/CDMGlobals.hpp"
+#include "src/core/StartupRequests.hpp"
 
 void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT Area) {
     try {
@@ -21,6 +22,9 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
         // FP Required functions
         CFlightPlan fp = FlightPlanSelectASEL();
         if (!fp.IsValid()) {
+            return;
+        }
+        if (!updateFlightRange(fp, CRadarTarget())) {
             return;
         }
         bool AtcMe = false;
@@ -41,7 +45,54 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
             AtcMe = true;
         }
 
-        if (FunctionId == TAG_FUNC_TOGGLE_AUTO_STARTUP) {
+        if (FunctionId == TAG_FUNC_STARTUP_REQUEST || FunctionId == TAG_FUNC_STARTUP_CLEAR ||
+            FunctionId == TAG_FUNC_STARTUP_REMOVE) {
+            string origin = fp.GetFlightPlanData().GetOrigin();
+            boost::to_upper(origin);
+            const auto frequencies = startupFrequencies.find(origin);
+            string startupRequest;
+            {
+                std::lock_guard<std::mutex> lock(startupRequestsMutex);
+                const auto airportRequests = startupRequests.find(origin);
+                if (airportRequests != startupRequests.end()) {
+                    const auto request = airportRequests->second.find(fp.GetCallsign());
+                    if (request != airportRequests->second.end()) startupRequest = request->second;
+                }
+            }
+            const StartupRequestState state = startupRequestState(startupRequest);
+            const string assignedFrequency = startupClearedFrequency(startupRequest);
+            if (serverEnabled && master && state != StartupRequestState::None) {
+                if (FunctionId == TAG_FUNC_STARTUP_REQUEST) {
+                    OpenPopupList(Area, "Start-up frequency", 1);
+                    bool selectedAdded = false;
+                    if (state == StartupRequestState::Cleared) {
+                        const string display =
+                            "Assigned: " + (assignedFrequency.empty() ? string("unavailable") : assignedFrequency);
+                        AddPopupListElement(display.c_str(), "", TAG_FUNC_STARTUP_CLEAR, false, 2, true);
+                    }
+                    if (frequencies != startupFrequencies.end()) {
+                        for (const string& frequency : frequencies->second) {
+                            const bool selected = !selectedAdded && frequency == assignedFrequency;
+                            AddPopupListElement(frequency.c_str(), "", TAG_FUNC_STARTUP_CLEAR, selected, 2, !AtcMe);
+                            if (selected) selectedAdded = true;
+                        }
+                    }
+                    AddPopupListElement("Revoke", "", TAG_FUNC_STARTUP_REMOVE, false, 2, !AtcMe);
+                } else if (FunctionId == TAG_FUNC_STARTUP_REMOVE) {
+                    if (AtcMe) runDetachedTask(&CDM::setCdmSts, string(fp.GetCallsign()), string("REQUEST/"));
+                } else if (AtcMe && frequencies != startupFrequencies.end() && ItemString &&
+                           find(frequencies->second.begin(), frequencies->second.end(), ItemString) !=
+                               frequencies->second.end() &&
+                           assignedFrequency != ItemString) {
+                    const string groundState = fp.GetGroundState();
+                    if (groundState != "PUSH" && groundState != "TAXI" && groundState != "DEPA" &&
+                        (groundState == "STUP" || groundState == "ST-UP" ||
+                         fp.GetControllerAssignedData().SetScratchPadString("STUP"))) {
+                        runDetachedTask(&CDM::setCdmSts, string(fp.GetCallsign()), string("REQUEST/CLR-") + ItemString);
+                    }
+                }
+            }
+        } else if (FunctionId == TAG_FUNC_TOGGLE_AUTO_STARTUP) {
             if (master && AtcMe) {
                 const string callsign = fp.GetCallsign();
                 const string autoStartup = getFlightStripInfo(fp, 10);
@@ -208,6 +259,20 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
                     if (hasNoNumber) {
                         setFlightStripInfo(fp, editedTSAC, 1);
                     }
+                }
+            }
+        }
+
+        else if (FunctionId == TAG_FUNC_SET_ASRT_REA || FunctionId == TAG_FUNC_REMOVE_ASRT_REA) {
+            if (master && AtcMe) {
+                if (FunctionId == TAG_FUNC_SET_ASRT_REA) {
+                    if (getFlightStripInfo(fp, 0).empty()) {
+                        setFlightStripInfo(fp, GetActualTime(), 0);
+                    }
+                    runDetachedTask(&CDM::setCdmSts, fp.GetCallsign(), "REA/1");
+                } else {
+                    setFlightStripInfo(fp, "", 0);
+                    runDetachedTask(&CDM::setCdmSts, fp.GetCallsign(), "REA/0");
                 }
             }
         }
@@ -1049,10 +1114,9 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
                         // if (!realMode) {
                         // Check API
                         setBy = "";
-                        for (int z = 0; z < reqTobtList.size(); z++) {
-                            reqTobtList.erase(reqTobtList.begin() + z);
-                            break;
-                        }
+                        const string callsign = fp.GetCallsign();
+                        reqTobtList.erase(std::remove(reqTobtList.begin(), reqTobtList.end(), callsign),
+                                          reqTobtList.end());
 
                         if (serverEnabled) {
                             // Hide calculation
@@ -1091,6 +1155,10 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
 
 void CDM::OnFlightPlanDisconnect(CFlightPlan FlightPlan) {
     if (FlightPlan.IsValid()) {
+        {
+            std::lock_guard<std::mutex> lock(flightWithinControllerRangeMutex);
+            flightWithinControllerRange[FlightPlan.GetCallsign()] = false;
+        }
         string tsat = getFlightStripInfo(FlightPlan, 3);
         if (tsat != "") {
             disconnectionList.push_back(FlightPlan.GetCallsign());
@@ -1100,4 +1168,35 @@ void CDM::OnFlightPlanDisconnect(CFlightPlan FlightPlan) {
             RemoveDataFromTfc(FlightPlan.GetCallsign());
         }
     }
+}
+
+bool CDM::updateFlightRange(CFlightPlan FlightPlan, CRadarTarget RadarTarget) {
+    bool withinRange = false;
+    if (FlightPlan.IsValid()) {
+        CController controller = ControllerMyself();
+        if (controller.IsValid()) {
+            const int range = controller.GetRange();
+            if (range > 0) {
+                if (!RadarTarget.IsValid()) {
+                    RadarTarget = RadarTargetSelect(FlightPlan.GetCallsign());
+                }
+                if (RadarTarget.IsValid()) {
+                    const CRadarTargetPositionData position = RadarTarget.GetPosition();
+                    if (position.IsValid()) {
+                        withinRange = controller.GetPosition().DistanceTo(position.GetPosition()) <= range;
+                    }
+                }
+            }
+        }
+
+        std::lock_guard<std::mutex> lock(flightWithinControllerRangeMutex);
+        flightWithinControllerRange[FlightPlan.GetCallsign()] = withinRange;
+    }
+    return withinRange;
+}
+
+bool CDM::isFlightWithinControllerRange(const string& callsign) {
+    std::lock_guard<std::mutex> lock(flightWithinControllerRangeMutex);
+    auto flightRange = flightWithinControllerRange.find(callsign);
+    return flightRange != flightWithinControllerRange.end() && flightRange->second;
 }

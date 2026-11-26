@@ -1,4 +1,19 @@
-# CDM 2.31.8b
+# CDM 2.32b
+
+Windows x86 (32-bit) beta for EuroScope, integrating the official changes
+through `rpuig2001/CDM` commit `5d47d0d6` after the `v2.32` tag.
+
+## Changes since 2.31.8b
+
+- Integrated upstream sequencing, ATFCM filtering, concurrent POST handling,
+  silent start-up, start-up requests and revocation, vSID requests, ASRT/REA,
+  de-icing, and vIFF data updates.
+- Preserved the fork's authenticated API build, EuroScope Plugin Bridge
+  (including `pm_sent`), and local CTOT and runway-pressure behavior.
+- Existing XML configurations remain usable; optional new settings for start-up
+  frequencies and vSID requests are documented in the README.
+
+## Previous release: 2.31.8b
 
 Windows x86 (32-bit) beta for EuroScope, based on official commit `75d0c535`.
 

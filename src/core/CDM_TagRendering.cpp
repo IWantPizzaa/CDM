@@ -3,6 +3,7 @@
 #include "CDMSingle.hpp"
 #include "src/api/CurlRestClient.h"
 #include "src/core/CDMGlobals.hpp"
+#include "src/core/StartupRequests.hpp"
 #include "src/models/Delay.h"
 #include "src/net/SFTP.h"
 #include "src/screen/CDMScreen.h"
@@ -38,11 +39,16 @@ void CDM::refreshFlightTimes() {
                 continue;
             }
 
+            CRadarTarget radarTarget = RadarTargetSelect(flightPlan.GetCallsign());
+            if (!updateFlightRange(flightPlan, radarTarget)) {
+                continue;
+            }
+
             char text[16] = {};
             int colorCode = 0;
             COLORREF color = 0;
             double fontSize = 0;
-            OnGetTagItem(flightPlan, CRadarTarget(), TAG_ITEM_TSAT, 0, text, &colorCode, &color, &fontSize);
+            OnGetTagItem(flightPlan, radarTarget, TAG_ITEM_TSAT, 0, text, &colorCode, &color, &fontSize);
         }
     } catch (const std::exception& error) {
         addLogLine("ERROR: Unhandled exception refreshFlightTimes: " + string(error.what()));
@@ -70,14 +76,20 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
 
         COLORREF ItemRGB = 0xFFFFFFFF;
         string callsign = FlightPlan.GetCallsign();
+        if (!updateFlightRange(FlightPlan, RadarTarget)) {
+            sItemString[0] = '\0';
+            return;
+        }
 
         // Serve from cache if this callsign+column was already computed this second - see
         // tagItemDisplayCache declaration for why. Falls through to the full computation below on a
         // miss, which then refreshes the cache at the end of the function.
         time_t tagCacheNow = std::time(nullptr);
+        const auto startupVersion = startupRequestsVersion.load();
         auto& tagCacheForAircraft = tagItemDisplayCache[callsign];
         auto tagCacheIt = tagCacheForAircraft.find(ItemCode);
-        if (tagCacheIt != tagCacheForAircraft.end() && tagCacheIt->second.tick == tagCacheNow) {
+        if (tagCacheIt != tagCacheForAircraft.end() && tagCacheIt->second.tick == tagCacheNow &&
+            (ItemCode != TAG_ITEM_STARTUP_REQUEST || tagCacheIt->second.startupRequestsVersion == startupVersion)) {
             memcpy(sItemString, tagCacheIt->second.text, sizeof(tagCacheIt->second.text));
             if (tagCacheIt->second.colorSet) {
                 *pColorCode = tagCacheIt->second.colorCode;
@@ -111,6 +123,11 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
 
         if (!isVfr) {
             time_t timeNow = std::time(nullptr);
+            static time_t countSaveData = 0;
+            if ((timeNow - countSaveData) >= 5) {
+                countSaveData = timeNow;
+                runDetachedTask(&CDM::saveData);
+            }
             // Refresh <refreshTime> min timers
             if ((timeNow - countNetworkTobt) > refreshTime) {
                 countNetworkTobt = timeNow;
@@ -145,6 +162,36 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
             }
 
             if (isCDMairport) {
+                bool master = false;
+                for (string apt : masterAirports) {
+                    if (apt == origin) {
+                        master = true;
+                    }
+                }
+                if (master) {
+                    const string currentAsrt = getFlightStripInfo(FlightPlan, 0);
+                    string restoredAsrt;
+                    {
+                        std::lock_guard<std::mutex> lock(asrtListMutex);
+                        bool found = false;
+                        for (size_t i = 0; i < asrtList.size(); i++) {
+                            if (asrtList[i][0] == callsign) {
+                                if (currentAsrt.empty()) {
+                                    restoredAsrt = asrtList[i][1];
+                                } else {
+                                    asrtList[i][1] = currentAsrt;
+                                }
+                                found = true;
+                            }
+                        }
+                        if (!found && !currentAsrt.empty()) asrtList.push_back({callsign, currentAsrt});
+                    }
+                    if (!restoredAsrt.empty()) {
+                        setFlightStripInfo(FlightPlan, restoredAsrt, 0);
+                        tagCacheForAircraft.clear();
+                    }
+                }
+
                 // If aircraft is in aircraftFind Base vector
                 int pos = -1;
                 bool aircraftFind = false;
@@ -183,6 +230,10 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                     if (ctotUpdated) {
                         countTime = std::time(nullptr) - refreshTime;
                     }
+                }
+
+                if (aircraftFind) {
+                    syncAtotFromFlightStrip(FlightPlan, slotList[pos]);
                 }
 
                 if (aircraftFind && getFlightStripInfo(FlightPlan, 10) == "1") {
@@ -304,6 +355,13 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                         }
                     }
                 }
+                for (size_t i = 0; i < disconnectionList.size();) {
+                    if (disconnectionList[i] == callsign) {
+                        disconnectionList.erase(disconnectionList.begin() + i);
+                    } else {
+                        i++;
+                    }
+                }
 
                 bool hasManualCtot = false;
                 if (aircraftFind) {
@@ -349,13 +407,8 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                     if ((string)FlightPlan.GetGroundState() == "DEPA") {
                         stsDepa = true;
                         setFlightStripInfo(FlightPlan, "", 3);
-                        setFlightStripInfo(FlightPlan, "", 4);
-                    }
-
-                    bool master = false;
-                    for (string apt : masterAirports) {
-                        if (apt == origin) {
-                            master = true;
+                        if (!atotEnabled) {
+                            setFlightStripInfo(FlightPlan, "", 4);
                         }
                     }
 
@@ -380,18 +433,19 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                         // Atot check
                         if (atotEnabled) {
                             if ((string)FlightPlan.GetGroundState() == "DEPA") {
-                                bool atotFound = false;
-                                for (size_t i = 0; i < atotSet.size(); i++) {
-                                    if (callsign == atotSet[i]) {
-                                        atotFound = true;
-                                    }
+                                Plane atotState(callsign, EOBT, "", getFlightStripInfo(FlightPlan, 4), "", "", false,
+                                                true, true);
+                                syncAtotFromFlightStrip(FlightPlan, atotState);
+                                const bool captureAtot = atotState.atot.empty();
+                                if (captureAtot) {
+                                    atotState.atot = GetTimeNow();
+                                    syncAtotToFlightStrip(FlightPlan, atotState);
                                 }
-                                if (!atotFound) {
-                                    atotSet.push_back(callsign);
-                                    // set TTOT to now
-                                    if (aircraftFind) {
-                                        slotList[pos].ttot = GetTimeNow();
-                                    }
+                                if (aircraftFind) {
+                                    slotList[pos].atot = atotState.atot;
+                                    if (captureAtot) slotList[pos].ttot = atotState.atot;
+                                } else if (captureAtot || getFlightStripInfo(FlightPlan, 4).empty()) {
+                                    setFlightStripInfo(FlightPlan, atotState.atot, 4);
                                 }
                             }
                         }
@@ -682,6 +736,7 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                     }
                                 }
                                 ItemRGB = TAG_YELLOW;
+                                if (status == "STND" && isStandDeiceReady(FlightPlan)) ItemRGB = TAG_GREEN;
                                 strcpy_s(sItemString, 16, status.c_str());
                             } else if (ItemCode == TAG_ITEM_TOBT_SETBY) {
                                 string status = getFlightStripInfo(FlightPlan, 9);
@@ -947,6 +1002,7 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                             if (TTOT != slotList[pos].ttot || EOBT != slotList[pos].eobt) {
                                                 Plane p(callsign, EOBT, TSAT, TTOT, keepCtot ? slotList[pos].ctot : "",
                                                         keepCtot ? slotList[pos].flowReason : "", keepCtot, true, true);
+                                                p.atot = slotList[pos].atot;
                                                 doRequest = true;
                                                 slotList[pos] = p;
                                                 setFlightStripInfo(FlightPlan, p.tsat, 3);
@@ -957,12 +1013,14 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                             doRequest = true;
                                             slotList.push_back(p);
                                             pos = getPlanePosition(callsign);
+                                            syncAtotFromFlightStrip(FlightPlan, slotList[pos]);
                                             setFlightStripInfo(FlightPlan, p.tsat, 3);
                                             setFlightStripInfo(FlightPlan, p.ttot, 4);
                                         }
                                         // Check API
                                         if (doRequest && recalculateOnTobtUpdate && recalculate && tobt.length() == 4) {
                                             if (serverEnabled) {
+                                                slotList[pos].showData = false;
                                                 std::lock_guard<std::mutex> lock(pendingTobtApiUpdatesMutex);
                                                 pendingTobtApiUpdates[callsign] = "";
                                             }
@@ -1005,10 +1063,13 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                             if (ItemCode == TAG_ITEM_TSAT || ItemCode == TAG_ITEM_TSAT_TOBT_DIFF) {
                                 // Sync TTOT
                                 if (aircraftFind) {
-                                    if (string(TSAT) != slotList[pos].tsat || string(TTOT) != slotList[pos].ttot) {
+                                    if (!stsDepa && getFlightStripInfo(FlightPlan, 3) != slotList[pos].tsat) {
                                         setFlightStripInfo(FlightPlan, slotList[pos].tsat, 3);
+                                    }
+                                    if (getFlightStripInfo(FlightPlan, 4) != slotList[pos].ttot) {
                                         setFlightStripInfo(FlightPlan, slotList[pos].ttot, 4);
                                     }
+                                    syncAtotToFlightStrip(FlightPlan, slotList[pos]);
                                 } else if (aircraftFind && !stsDepa) {
                                     string myTSAT = TSAT;
                                     string myTTOT = TTOT;
@@ -1920,6 +1981,7 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                     }
                                 }
                                 ItemRGB = TAG_YELLOW;
+                                if (status == "STND" && isStandDeiceReady(FlightPlan)) ItemRGB = TAG_GREEN;
                                 strcpy_s(sItemString, 16, status.c_str());
                             } else if (ItemCode == TAG_ITEM_TOBT_SETBY) {
                                 string status = getFlightStripInfo(FlightPlan, 9);
@@ -1980,7 +2042,10 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                             }
                                             if (!aicraftInFinalTimesList) {
                                                 p.showData = slotList[d].showData;
+                                                if (p.atot.empty()) p.atot = slotList[d].atot;
                                                 slotList[d] = p;
+                                                syncAtotToFlightStrip(FlightPlanSelect(p.callsign.c_str()),
+                                                                      slotList[d]);
                                                 string pendingTobtApi;
                                                 {
                                                     std::lock_guard<std::mutex> lock(pendingTobtApiUpdatesMutex);
@@ -2045,7 +2110,10 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                         bool TSATFind = true;
                         string TSATString = getFlightStripInfo(FlightPlan, 3);
                         string TTOTString = getFlightStripInfo(FlightPlan, 4);
-                        if (TSATString == "") {
+                        if (aircraftFind && pos < slotList.size()) {
+                            syncAtotFromFlightStrip(FlightPlan, slotList[pos]);
+                        }
+                        if (TSATString == "" && (!atotEnabled || getFlightStripInfo(FlightPlan, 11).empty())) {
                             TSATFind = false;
                         }
 
@@ -2063,6 +2131,7 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                         } else {
                             if (TSATFind) {
                                 Plane p(callsign, EOBT, TSATString, TTOTString, "", "", hasManualCtot, true, true);
+                                syncAtotFromFlightStrip(FlightPlan, p);
                                 slotList.push_back(p);
                             }
                         }
@@ -2800,6 +2869,7 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                     }
                                 }
                                 ItemRGB = TAG_YELLOW;
+                                if (status == "STND" && isStandDeiceReady(FlightPlan)) ItemRGB = TAG_GREEN;
                                 strcpy_s(sItemString, 16, status.c_str());
                             } else if (ItemCode == TAG_ITEM_TOBT_SETBY) {
                                 string status = getFlightStripInfo(FlightPlan, 9);
@@ -3024,6 +3094,7 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                                     }
                                 }
                                 ItemRGB = TAG_YELLOW;
+                                if (status == "STND" && isStandDeiceReady(FlightPlan)) ItemRGB = TAG_GREEN;
                                 strcpy_s(sItemString, 16, status.c_str());
                             } else if (ItemCode == TAG_ITEM_TOBT_SETBY) {
                                 string status = getFlightStripInfo(FlightPlan, 9);
@@ -3248,6 +3319,7 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
                             }
                         }
                         ItemRGB = TAG_YELLOW;
+                        if (status == "STND" && isStandDeiceReady(FlightPlan)) ItemRGB = TAG_GREEN;
                         strcpy_s(sItemString, 16, status.c_str());
                     } else if (ItemCode == TAG_ITEM_TOBT_SETBY) {
                         string status = getFlightStripInfo(FlightPlan, 9);
@@ -3578,6 +3650,27 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
             }
         }
 
+        if (ItemCode == TAG_ITEM_STARTUP_REQUEST) {
+            sItemString[0] = '\0';
+            StartupRequestState state = StartupRequestState::None;
+            if (serverEnabled) {
+                std::lock_guard<std::mutex> lock(startupRequestsMutex);
+                auto airportRequests = startupRequests.find(origin);
+                if (airportRequests != startupRequests.end()) {
+                    auto request = airportRequests->second.find(callsign);
+                    if (request != airportRequests->second.end()) state = startupRequestState(request->second);
+                }
+            }
+            if (state != StartupRequestState::None) {
+                strcpy_s(sItemString, 16, "RST");
+                ItemRGB = state == StartupRequestState::Requested
+                              ? TAG_STARTUP_REQUEST
+                              : (TAG_GREEN == 0xFFFFFFFF ? RGB(0, 192, 0) : TAG_GREEN);
+                *pColorCode = TAG_COLOR_RGB_DEFINED;
+                *pRGB = ItemRGB;
+            }
+        }
+
         if (ItemCode == TAG_ITEM_AUTO_STARTUP) {
             const string autoStartup = getFlightStripInfo(FlightPlan, 10);
             const bool enabled = autoStartup == "1" || autoStartup == "2";
@@ -3590,6 +3683,7 @@ void CDM::OnGetTagItem(CFlightPlan FlightPlan, CRadarTarget RadarTarget, int Ite
         // Refresh the display cache with this call's finished result for reuse within the same second.
         TagItemCacheEntry& cacheEntryToStore = tagItemDisplayCache[callsign][ItemCode];
         cacheEntryToStore.tick = tagCacheNow;
+        cacheEntryToStore.startupRequestsVersion = startupVersion;
         memcpy(cacheEntryToStore.text, sItemString, sizeof(cacheEntryToStore.text));
         cacheEntryToStore.colorSet = (ItemRGB != 0xFFFFFFFF);
         if (cacheEntryToStore.colorSet) {

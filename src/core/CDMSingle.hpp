@@ -29,6 +29,7 @@
 #include "src/models/Plane.h"
 #include "src/models/Rate.h"
 #include "src/models/ServerRestricted.h"
+#include "src/models/VatsimAtcStatus.h"
 #include "src/models/sidInterval.h"
 #define CURL_STATICLIB
 #include <dbghelp.h>
@@ -51,7 +52,7 @@
 #endif
 
 #define MY_PLUGIN_NAME "CDM Plugin"
-#define MY_PLUGIN_VERSION "2.31.8b"
+#define MY_PLUGIN_VERSION "2.32b"
 #define MY_PLUGIN_DEVELOPER "Roger Puig"
 #define MY_PLUGIN_COPYRIGHT "GPL v3"
 #define MY_PLUGIN_VIEW_AVISO "Euroscope CDM"
@@ -64,6 +65,8 @@ using namespace rapidjson;
 using namespace EuroScopePlugIn;
 
 class CDM : public EuroScopePlugIn::CPlugIn {
+    VatsimAtcStatus vatsimAtcStatus_;
+
    public:
     CDM();
     virtual ~CDM();
@@ -74,6 +77,7 @@ class CDM : public EuroScopePlugIn::CPlugIn {
     vector<string> getMasterAirports();
     vector<vector<string>> getServerMasterAirports();
     void fetchRelevantFlights();
+    bool isDepartureAtcOffline(const string& airport) const;
     bool setCdmServerStatusFromDialog(std::vector<std::string> flight, string request);
     void sendAtfcmPrivateMessageToPilotCon(std::vector<std::string> flight);
     bool sendAtfcmPrivateMessageToPilot(vector<string> flight);
@@ -94,6 +98,10 @@ class CDM : public EuroScopePlugIn::CPlugIn {
     int getHourlyRateForRunway(const string& airport, const string& depRwy);
 
     void PushToOtherControllers(CFlightPlan fp);
+
+    bool updateFlightRange(CFlightPlan FlightPlan, CRadarTarget RadarTarget);
+
+    bool isFlightWithinControllerRange(const string& callsign);
 
     void deleteFlightStrips(string callsign);
 
@@ -391,6 +399,8 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     int getDeIceTime(char wtc, int remNum);
 
+    bool isStandDeiceReady(CFlightPlan flightPlan);
+
     string getDiffTOBTTSAT(string TSAT, string TOBT);
 
     string getDiffNowTime(string time, bool equalReturnZero, string timeNow);
@@ -415,6 +425,10 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     void setFlightStripInfo(CFlightPlan FlightPlan, string text, int position);
 
+    void syncAtotFromFlightStrip(CFlightPlan FlightPlan, Plane& plane);
+
+    void syncAtotToFlightStrip(CFlightPlan FlightPlan, Plane& plane);
+
     void refreshActions1();
 
     void refreshActions3();
@@ -422,6 +436,10 @@ class CDM : public EuroScopePlugIn::CPlugIn {
     void refreshMasterAirports();
 
     void refreshFlightTimes();
+
+    void processVsidRequests();
+
+    void OnFlightPlanControllerAssignedDataUpdate(CFlightPlan flightPlan, int dataType);
 
     void refreshActions4();
 

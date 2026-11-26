@@ -59,6 +59,16 @@ void CDM::disconnectTfcs() {
 void CDM::RemoveDataFromTfc(string callsign) {
     addLogLine("Called RemoveDataFromTfc...");
     try {
+        {
+            std::lock_guard<std::mutex> lock(asrtListMutex);
+            for (size_t i = 0; i < asrtList.size();) {
+                if (asrtList[i][0] == callsign) {
+                    asrtList.erase(asrtList.begin() + i);
+                } else {
+                    i++;
+                }
+            }
+        }
         // Delete from vector (fix iterator invalidation: only increment if no erase)
         for (size_t i = 0; i < slotList.size();) {
             if (callsign == slotList[i].callsign) {
@@ -237,15 +247,6 @@ void CDM::RemoveDataFromTfc(string callsign) {
                     sendMessage("[DEBUG MESSAGE] - " + callsign + " REMOVED 16");
                 }
                 deiceList.erase(deiceList.begin() + i);
-            }
-        }
-        // Remove from atotSet
-        for (size_t i = 0; i < atotSet.size(); i++) {
-            if (callsign == atotSet[i]) {
-                if (debugMode) {
-                    sendMessage("[DEBUG MESSAGE] - " + callsign + " REMOVED 17");
-                }
-                atotSet.erase(atotSet.begin() + i);
             }
         }
         // Remove from dataSaved

@@ -59,6 +59,7 @@ jobs:
           cmake --preset vcpkg
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
           -DCDM_REQUIRE_API_KEY="$env:CDM_REQUIRE_API_KEY"
+          -DCDM_BUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build --config Release --parallel

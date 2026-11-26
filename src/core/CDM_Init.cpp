@@ -80,10 +80,14 @@ CDM::CDM(void)
     RegisterTagItemType("ASRT", TAG_ITEM_ASRT);
     RegisterTagItemFunction("Toggle ASRT", TAG_FUNC_TOGGLEASRT);
     RegisterTagItemFunction("Toggle ASRT+REA", TAG_FUNC_TOGGLEASRTREA);
+    RegisterTagItemFunction("Set ASRT+REA", TAG_FUNC_SET_ASRT_REA);
+    RegisterTagItemFunction("Remove ASRT+REA", TAG_FUNC_REMOVE_ASRT_REA);
 
     // Register Tag Item "CDM-ASAT"
     RegisterTagItemType("Ready Start-up", TAG_ITEM_READYSTARTUP);
     RegisterTagItemFunction("Toggle Ready Start-up", TAG_FUNC_READYSTARTUP);
+    RegisterTagItemType("Start-up Request", TAG_ITEM_STARTUP_REQUEST);
+    RegisterTagItemFunction("Start-up Request Options", TAG_FUNC_STARTUP_REQUEST);
 
     // Register Tag Item "CDM-E"
     RegisterTagItemType("E", TAG_ITEM_E);
@@ -202,7 +206,27 @@ CDM::CDM(void)
     }
 
     try {
+        xml_document startupConfig;
+        if (startupConfig.load_file(pfad.c_str())) {
+            startupFrequencies.clear();
+            for (const auto& airport : startupConfig.child("CDM").child("StartupFrequencies").children("Airport")) {
+                string icao = airport.attribute("icao").as_string();
+                boost::to_upper(icao);
+                if (icao.empty()) continue;
+                for (const auto& frequency : airport.children("Frequency")) {
+                    string value = frequency.attribute("value").as_string();
+                    if (regex_match(value, regex("^[0-9]{3}\\.[0-9]{3}$"))) {
+                        startupFrequencies[icao].push_back(value);
+                    }
+                }
+            }
+        }
         defTaxiTime = stoi(getFromXml("/CDM/DefaultTaxiTime/@minutes"));
+        string deIceStandStartMinutesString = getFromXml("/CDM/DeIceStandStart/@minutes");
+        deIceStandStartMinutes = deIceStandStartMinutesString.empty() ? 5 : stoi(deIceStandStartMinutesString);
+        if (deIceStandStartMinutes < -1) {
+            throw invalid_argument("DeIceStandStart minutes must be -1 or greater");
+        }
         string deIceLight = getFromXml("/CDM/DeIceTimes/@light");
         string deIceMedium = getFromXml("/CDM/DeIceTimes/@medium");
         string deIceHeavy = getFromXml("/CDM/DeIceTimes/@heavy");
@@ -240,6 +264,7 @@ CDM::CDM(void)
         ftpPassword = getFromXml("/CDM/ftpPassword/@password");
         string sftpConnectionString = getFromXml("/CDM/sftpConnection/@mode");
         string cdmserver = getFromXml("/CDM/Server/@mode");
+        vsidRequestsEnabled = getFromXml("/CDM/vSidRequests/@mode") == "true";
         string opt_su_wait = getFromXml("/CDM/Su_Wait/@mode");
         cdmServerUrl = getFromXml("/CDM/viffSystem/@url");
         customRestrictedUrl = getFromXml("/CDM/customRestricted/@url");
@@ -608,6 +633,9 @@ CDM::CDM(void)
                     break;
                 case 14:
                     TAG_NON_CDM_EARLY_CLEARENCE = color;
+                    break;
+                case 15:
+                    TAG_STARTUP_REQUEST = color;
                     break;
                 default:
                     break;

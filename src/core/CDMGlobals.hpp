@@ -14,6 +14,8 @@
 // the CDMSingle.cpp split mechanical and behavior-preserving. Turning these into a proper state
 // object is a separate, larger effort.
 
+#include <atomic>
+#include <cstdint>
 #include <unordered_map>
 
 #include "CDMSingle.hpp"
@@ -74,6 +76,8 @@ inline bool readySetTsac;
 inline bool recalculateOnTobtUpdate;
 inline std::unordered_map<string, string> pendingTobtApiUpdates;
 inline std::mutex pendingTobtApiUpdatesMutex;
+inline std::unordered_map<string, bool> flightWithinControllerRange;
+inline std::mutex flightWithinControllerRangeMutex;
 inline bool sidIntervalEnabled;
 inline bool readyToUpdateList;
 inline bool autoSetTobtFromEvSlot;
@@ -111,6 +115,7 @@ inline int deIceTimeL;
 inline int deIceTimeM;
 inline int deIceTimeH;
 inline int deIceTimeJ;
+inline int deIceStandStartMinutes = 5;
 
 inline int deIceTaxiRem1;
 inline int deIceTaxiRem2;
@@ -137,6 +142,7 @@ inline vector<Plane> slotList;
 // this lets OnGetTagItem just display the last computed value instead of redoing all the work.
 struct TagItemCacheEntry {
     time_t tick = 0;
+    std::uint64_t startupRequestsVersion = 0;
     char text[16] = {0};
     bool colorSet = false;
     int colorCode = 0;
@@ -171,6 +177,8 @@ inline vector<string> CDMairports;
 inline vector<string> CTOTcheck;
 inline vector<string> finalTimesList;
 inline vector<string> disconnectionList;
+inline vector<vector<string>> asrtList;
+inline std::mutex asrtListMutex;
 inline vector<string> reaSent;
 inline vector<string> reaCTOTSent;
 inline vector<vector<string>> slotFile;
@@ -194,7 +202,6 @@ inline vector<Plane> apiQueueResponse;
 inline std::mutex apiQueueResponseMutex;
 inline vector<vector<string>> deiceList;
 inline vector<sidInterval> sidIntervalList;
-inline vector<string> atotSet;
 inline vector<vector<string>> relevantFlights;
 inline vector<string> messagesSent;
 inline vector<string> reqTobtList;
@@ -205,6 +212,13 @@ inline std::mutex later4Mutex;
 inline std::mutex networkStatusMutex;
 inline std::mutex reqTobtTypesQueueMutex;
 inline vector<vector<string>> reqTobtTypesQueue;
+inline std::unordered_map<string, vector<string>> startupFrequencies;
+inline std::unordered_map<string, std::unordered_map<string, string>> startupRequests;
+inline bool vsidRequestsEnabled = false;
+inline std::unordered_map<string, std::unordered_map<string, string>> vsidRequests;
+inline std::mutex startupRequestsMutex;
+inline std::atomic<std::uint64_t> startupRequestsVersion{0};
+inline std::mutex networkTobtPollMutex;
 
 inline COLORREF TAG_GREEN = 0xFFFFFFFF;
 inline COLORREF TAG_GREENNOTACTIVE = 0xFFFFFFFF;
@@ -220,3 +234,4 @@ inline COLORREF TAG_CTOT = 0xFFFFFFFF;
 inline COLORREF SU_SET_COLOR = 0xFFFFFFFF;
 inline COLORREF BLOCKS_CALLSIGN_COLOR = RGB(220, 220, 220);
 inline COLORREF TAG_NON_CDM_EARLY_CLEARENCE = RGB(128, 0, 128);
+inline COLORREF TAG_STARTUP_REQUEST = RGB(64, 160, 255);

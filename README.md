@@ -36,6 +36,18 @@ Times are signed 64-bit minutes since midnight UTC. Fields are
 eligible for the bridge's opt-in remote relay; relay configuration and remote
 publisher arbitration remain the responsibility of bridge consumers.
 
+## ATFCM Local ATC Filter
+
+In the `.cdm atfcm` panel, uncheck **Show departures with local ATC** to
+show only flights whose departure has no matching controller or ATIS. The first
+four callsign characters are matched to the departure ICAO, including positions
+such as `EDDM_2_GND`. All facilities are included.
+
+The VATSIM data feed is checked every five minutes while the ATFCM panel is in
+use. Until a successful check, or if the last successful check is over five
+minutes old, the filtered view hides flights rather than assuming ATC is offline.
+The checkbox is checked by default to preserve the existing view.
+
 ## How to use:
 - Load up the plugin.
 - If there is no master controller, you should use the command ``.cdm master {airport}`` of the airport you want to become the master. You can have as many airports as you want, but there can ony be **1 MASTER at the same time** (The MASTER should be DELIVERY or the lowest ATC position to have access to all CDM actions).
@@ -117,6 +129,8 @@ publisher arbitration remain the responsibility of bridge consumers.
 
   <img width="430" height="101" alt="image" src="https://github.com/user-attachments/assets/71329668-45d3-41d0-a0b5-5b3608ca7516" />
 
+- [2.32 WIP] Start-up Request: add the `Start-up Request` tag item and assign `Start-up Request Options` to its click action. `RST` is blue for a pilot request and green after the server reports a clearance. The airport's CDM master can click green `RST` to see the assigned frequency or select another configured frequency. Selecting a frequency sends `REQUEST/CLR-<frequency>` and sets the EuroScope start-up ground state. Server mode must be enabled.
+
 
 - Extra (All CDM Option in one Menu)
 
@@ -150,8 +164,26 @@ publisher arbitration remain the responsibility of bridge consumers.
   - color10 = ASRT STATIC COLOR
   - color11 = CTOT STATIC COLOR
   - color12 = CHANGES TOBT, TSAT and ASAT to the defined color WHEN S/U STATUS IS SET
+  - color15 = START-UP REQUEST COLOR (default light blue, `color15:64,160,255`). Cleared requests use color1 (green).
  
 ### CDMconfig.xml
+  - [2.32 WIP] [OPTIONAL] Enable `<vSidRequests mode="true" />` to forward pilot `STUP`, `PUSH` and `TAXI` requests to vSID as startup, pushback and taxi requests. Disabled by default. This requires vSID to be loaded with the departure airport active and its startup, pushback and taxi request lists enabled. The CDM master sends each request once; server mode and an active radar screen are required.
+  - [2.32 WIP] [OPTIONAL] Configure start-up clearance frequencies by airport. Airports without entries have no frequency menu. The plugin polls configured airports and master airports for start-up requests.
+
+    ```xml
+    <StartupFrequencies>
+      <Airport icao="EDDF">
+        <Frequency value="121.855" />
+        <Frequency value="121.655" />
+        <Frequency value="121.955" />
+        <Frequency value="121.755" />
+        <Frequency value="121.925" />
+      </Airport>
+      <Airport icao="EDDS">
+        <Frequency value="121.705" />
+      </Airport>
+    </StartupFrequencies>
+    ```
   - Normal Visibility Operations Rate/hour (ex. rate ops="40").
   - Low Visibility Operations Rate/hour (ex. rateLvo ops="10").
   - Default Runway Pressure in minutes (ex. `<runwayPressure minutes="15"/>`). Use `-1` to disable runway pressure everywhere. With a default of `0` or greater, a positive rate.txt runway value or runtime runway override can enable pressure; omitted values use the default.
@@ -169,6 +201,7 @@ publisher arbitration remain the responsibility of bridge consumers.
   - [OPTIONAL] sidInterval URL to the TXT file - Format is defined below (ex. sidInterval url:"https://...."), if no URL needed, just leave it blank to disable the sidInterval functionallity (ex. sidInterval url="").
   - Default Taxi time in minutes if taxi time not found in the taxizones.txt file (ex. DefaultTaxiTime minutes="15").
   - [OPTIONAL] DeIceTimes by Wtc definition (ex. "<DeIceTimes light="5" medium="9" heavy="12" super="15"/>") If no defined, values 5, 9, 12 and 15 are used internally.
+  - [OPTIONAL] Configure when the DE-ICE tag indicates that stand de-icing can start (ex. `<DeIceStandStart minutes="5"/>`). The readiness time is scheduled TSAT minus the WTC-specific DeIceTime and this value. Default 5 minutes (TSAT-5-DeIceTimeWtc), -1 to disable the indication.
   - [OPTIONAL] DeIce Remote Additional Taxi Time and name definition (ex. "<DeIceRemTaxi rem1Name= "REM1" rem1="10" rem2Name= "REM2" rem2="10" rem3Name= "REM3" rem3="10" rem4Name= "REM4" rem4="10" rem5Name= "REM5" rem5="10"/>") If not defined, extra 0 minutes are used. In case of empty remXName, the option will be disabled in the popup menu of Euroscope (Example: By setting rem2Name= "", rem2 will not be available in Euroscope).
   - Event Mode minutes, it specifies the amount of minutes to add to all flights by default (if not configured EVENT_EXTRA_TIME in taxizones) when event mode is enabled (by command) (ex. eventModeMin time="5").
   - Refresh Time in seconds (ex. RefreshTime seconds="20").

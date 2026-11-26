@@ -6,6 +6,7 @@
 
 #include "CDMSingle.hpp"
 #include "src/core/CDMGlobals.hpp"
+#include "src/core/StartupRequests.hpp"
 
 void CDM::getCdmServerRestricted(vector<Plane> slotListTemp) {
     if (serverEnabled) {
@@ -68,6 +69,7 @@ void CDM::getCdmServerRestricted(vector<Plane> slotListTemp) {
                         if (ctot.size() == 4) {
                             for (size_t z = 0; z < slotListTemp.size(); z++) {
                                 if (slotListTemp[z].callsign == callsign && !flightHasCtotDisabled(callsign)) {
+                                    const string atot = slotListTemp[z].atot;
                                     slotListTemp[z] = {callsign,
                                                        slotListTemp[z].eobt,
                                                        slotListTemp[z].tsat,
@@ -77,6 +79,7 @@ void CDM::getCdmServerRestricted(vector<Plane> slotListTemp) {
                                                        true,
                                                        true,
                                                        true};
+                                    slotListTemp[z].atot = atot;
                                 }
                             }
                         }
@@ -181,7 +184,21 @@ void CDM::sendWaitingCdmData() {
 
     for (const Plane& plane : callsignsToProcess) {
         addLogLine("sendWaitingCdmData - " + plane.callsign);
-        updateCdmDataApi(plane);
+        Plane currentPlane = plane;
+        bool isHidden = false;
+        for (const Plane& current : slotList) {
+            if (current.callsign == plane.callsign) {
+                isHidden = !current.showData;
+                currentPlane = current;
+                break;
+            }
+        }
+        if (isHidden) {
+            std::lock_guard<std::mutex> lock(later4Mutex);
+            setCdmDatalater.push_back(plane);
+            continue;
+        }
+        updateCdmDataApi(currentPlane);
     }
 }
 
@@ -201,6 +218,10 @@ void CDM::sendCheckCIDLater() {
 }
 
 void CDM::updateCdmDataApi(Plane p) {
+    if (!isFlightWithinControllerRange(p.callsign)) {
+        addLogLine("Skipping CDM data update outside controller range for " + p.callsign);
+        return;
+    }
     if (serverEnabled) {
         addLogLine("Called updateCdmDataApi...");
         try {
@@ -250,6 +271,7 @@ void CDM::updateCdmDataApi(Plane p) {
                 std::lock_guard<std::mutex> lock(later4Mutex);
                 setCdmDatalater.push_back(p);
                 addLogLine("UNABLE TO CONNECT CDM-API...");
+                if (responseCode == -1) addLogLine("POST failed: " + response.body);
             } else {
                 std::istringstream is(response.body);
                 // Get data from .txt file
@@ -285,6 +307,10 @@ void CDM::setOBTApi(string callsign, string obt, bool triggeredByUser, bool useE
 
         addLogLine("Call - Set OBT (" + obt + ") for " + callsign + " with triggeredByUser=" +
                    (triggeredByUser ? "true" : "false") + " and useEobt=" + (useEobt ? "true" : "false"));
+        if (!isFlightWithinControllerRange(callsign)) {
+            addLogLine("Skipping OBT update outside controller range for " + callsign);
+            return;
+        }
         bool createRequest = false;
 
         if (obt != "") {
@@ -326,13 +352,16 @@ void CDM::setOBTApi(string callsign, string obt, bool triggeredByUser, bool useE
                     setOBTlater.push_back(plane);  // Safely modify setOBTlater
                 }
                 addLogLine("UNABLE TO CONNECT CDM-API...");
+                if (responseCode == -1) addLogLine("POST failed: " + response.body);
             } else {
                 Json::Reader reader;
                 Json::Value obj;
                 Json::FastWriter fastWriter;
-                reader.parse(response.body, obj);
-                if (obj.isMember("callsign") && obj.isMember("ctot") && obj.isMember("atfcmData") &&
-                    obj["atfcmData"].isMember("mostPenalisingRegulation")) {
+                const bool validResponse = reader.parse(response.body, obj) && obj.isObject() &&
+                                           obj.isMember("callsign") && obj.isMember("ctot") &&
+                                           obj.isMember("atfcmData") && obj["atfcmData"].isObject() &&
+                                           obj["atfcmData"].isMember("mostPenalisingRegulation");
+                if (validResponse) {
                     string apiCallsign = fastWriter.write(obj["callsign"]);
                     apiCallsign.erase(remove(apiCallsign.begin(), apiCallsign.end(), '"'), apiCallsign.end());
                     apiCallsign.erase(remove(apiCallsign.begin(), apiCallsign.end(), '\n'), apiCallsign.end());
@@ -352,6 +381,7 @@ void CDM::setOBTApi(string callsign, string obt, bool triggeredByUser, bool useE
                             if (!ctot.empty() && !flightHasCtotDisabled(apiCallsign)) {
                                 // Update with thread-safe access
                                 {
+                                    const string atot = slotListTemp[i].atot;
                                     slotListTemp[i] = {apiCallsign,
                                                        slotListTemp[i].eobt,
                                                        slotListTemp[i].tsat,
@@ -361,6 +391,7 @@ void CDM::setOBTApi(string callsign, string obt, bool triggeredByUser, bool useE
                                                        true,
                                                        true,
                                                        true};
+                                    slotListTemp[i].atot = atot;
                                 }
                             } else {
                                 if (slotListTemp[i].ctot != "") {
@@ -450,10 +481,24 @@ void CDM::setCdmSts(string callsign, string cdmSts) {
             const auto response = restclient_->post(url, /*body=*/"", headers);
             int responseCode = response.statusCode;
 
+            if ((cdmSts == "REQUEST/" || cdmSts.compare(0, 12, "REQUEST/CLR-") == 0) && responseCode >= 200 &&
+                responseCode < 300 && boost::trim_copy(response.body) == "true") {
+                std::lock_guard<std::mutex> lock(startupRequestsMutex);
+                for (auto& airportRequests : startupRequests) {
+                    const bool updated = cdmSts == "REQUEST/"
+                                             ? applyConfirmedStartupRemoval(airportRequests.second, callsign)
+                                             : applyConfirmedStartupClearance(airportRequests.second, callsign, cdmSts);
+                    if (updated) {
+                        ++startupRequestsVersion;
+                    }
+                }
+            }
+
             if (responseCode == 404 || responseCode == 401 || responseCode == 502 || responseCode == -1) {
                 std::lock_guard<std::mutex> lock(later2Mutex);
                 setCdmStslater.push_back({callsign, cdmSts});
                 addLogLine("UNABLE TO CONNECT CDM-API...");
+                if (responseCode == -1) addLogLine("POST failed: " + response.body);
             } else {
                 std::istringstream is(response.body);
                 string lineValue;
@@ -738,16 +783,35 @@ vector<vector<string>> CDM::getDepAirportPlanes(string airport) {
 
             string url = cdmServerUrl + "/ifps/depAirport?airport=" + airport;
             std::unordered_map<std::string, std::string> headers = {{"x-api-key", apikey}};
+            const auto requestVersion = startupRequestsVersion.load();
             const auto response = restclient_->get(url, headers);
             int responseCode = response.statusCode;
 
-            if (responseCode == 404 || responseCode == 401 || responseCode == 502 || responseCode == -1) {
+            if (responseCode < 200 || responseCode >= 300) {
                 addLogLine("UNABLE TO LOAD CDM-API URL...");
             } else {
                 Json::Reader reader;
                 Json::Value obj;
                 Json::FastWriter fastWriter;
-                reader.parse(response.body, obj);
+                if (!reader.parse(response.body, obj) || !obj.isArray()) {
+                    addLogLine("Invalid departure airport response for " + airport);
+                    return planes;
+                }
+
+                {
+                    auto requests = startupRequestsFromFlights(obj);
+                    auto pushTaxiRequests = vsidRequestsFromFlights(obj);
+                    std::lock_guard<std::mutex> lock(startupRequestsMutex);
+                    vsidRequests[airport] = std::move(pushTaxiRequests);
+                    if (startupRequestsVersion.load() == requestVersion) {
+                        startupRequests[airport] = std::move(requests);
+                        ++startupRequestsVersion;
+                    }
+                }
+
+                if (!pilotTobt || find(masterAirports.begin(), masterAirports.end(), airport) == masterAirports.end()) {
+                    return planes;
+                }
 
                 const Json::Value& data = obj;
                 for (size_t i = 0; i < data.size(); i++) {
@@ -879,12 +943,19 @@ void CDM::getIffOffBlockTimes() {
 }
 
 void CDM::getNetworkTobt() {
-    if (serverEnabled && pilotTobt) {
+    std::unique_lock<std::mutex> pollLock(networkTobtPollMutex, std::try_to_lock);
+    if (serverEnabled && pollLock.owns_lock()) {
         addLogLine("Called getNetworkTobt...");
         vector<vector<string>> planes;
-        for (string airport : masterAirports) {
+        vector<string> airports = masterAirports;
+        for (const auto& entry : startupFrequencies) airports.push_back(entry.first);
+        sort(airports.begin(), airports.end());
+        airports.erase(unique(airports.begin(), airports.end()), airports.end());
+        for (const string& airport : airports) {
             vector<vector<string>> newplanes = getDepAirportPlanes(airport);
-            planes.insert(planes.end(), newplanes.begin(), newplanes.end());
+            if (pilotTobt && find(masterAirports.begin(), masterAirports.end(), airport) != masterAirports.end()) {
+                planes.insert(planes.end(), newplanes.begin(), newplanes.end());
+            }
         }
 
         vector<Plane> mySlotList = slotList;
@@ -895,7 +966,7 @@ void CDM::getNetworkTobt() {
             if (plane.size() == 4) {
                 if (plane[3] != "" && plane[0] != "") {
                     CFlightPlan fp1 = FlightPlanSelect(plane[0].c_str());
-                    if (fp1.IsValid()) {
+                    if (fp1.IsValid() && isFlightWithinControllerRange(plane[0])) {
                         // Update ASRT
                         string prevAsrt = getFlightStripInfo(fp1, 0);
                         if ((string)fp1.GetGroundState() != "STUP" && (string)fp1.GetGroundState() != "ST-UP" &&
@@ -920,7 +991,7 @@ void CDM::getNetworkTobt() {
                                      (mySlotList[i].hasManualCtot && mySlotList[i].ctot != "")) {
                                 found = true;
                                 CFlightPlan fp = FlightPlanSelect(mySlotList[i].callsign.c_str());
-                                if (!fp.IsValid()) {
+                                if (!fp.IsValid() || !isFlightWithinControllerRange(mySlotList[i].callsign)) {
                                     continue;
                                 }
 
@@ -958,7 +1029,7 @@ void CDM::getNetworkTobt() {
                         if (plane[1] != "") {
                             addLogLine("Updating TOBT for: " + plane[0] + " Old: outdated New: " + plane[1] + "00");
                             CFlightPlan fp = FlightPlanSelect(plane[0].c_str());
-                            if (!fp.IsValid()) {
+                            if (!fp.IsValid() || !isFlightWithinControllerRange(plane[0])) {
                                 continue;
                             }
                             setFlightStripInfo(fp, plane[1], 2);
@@ -990,7 +1061,7 @@ void CDM::getNetworkTobt() {
         }
         addLogLine("COMPLETED - getNetworkTobt");
         // Update times to slaves
-        countTime = std::time(nullptr) - refreshTime;
+        if (pilotTobt) countTime = std::time(nullptr) - refreshTime;
     }
 }
 
@@ -1072,7 +1143,7 @@ void CDM::copyServerSavedData(string airport) {
         for (vector<string> newplane : newplanes) {
             bool updated = false;
             CFlightPlan fp = FlightPlanSelect(newplane[0].c_str());
-            if (!fp.IsValid()) {
+            if (!fp.IsValid() || !isFlightWithinControllerRange(newplane[0])) {
                 continue;
             }
             for (Plane plane : slotList) {
