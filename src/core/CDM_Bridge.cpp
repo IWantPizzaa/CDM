@@ -1,5 +1,6 @@
 #include "CDMSingle.hpp"
 #include "src/core/CDMGlobals.hpp"
+#include "src/core/CdmAirportPanel.hpp"
 
 #define ESB_CLIENT_SHIM
 #include <algorithm>
@@ -24,6 +25,7 @@ enum CdmBridgeField {
     BRIDGE_ECFMP_RESTRICTION,
     BRIDGE_MANUAL_CTOT,
     BRIDGE_PM_SENT,
+    BRIDGE_AIRPORT_PANEL,
     BRIDGE_FIELD_COUNT
 };
 
@@ -48,6 +50,8 @@ const ESB_FieldDecl kCdmBridgeFields[] = {
     {"manual_ctot", ESB_T_BOOL, ESB_SCOPE_AIRCRAFT, ESB_F_SYNC, 0, "True when the CTOT was assigned manually"},
     {"pm_sent", ESB_T_BOOL, ESB_SCOPE_AIRCRAFT, ESB_F_SYNC, 0,
      "True when the CDM private message (S) has been sent to the pilot"},
+    {"airport_panel", ESB_T_STR, ESB_SCOPE_GLOBAL, 0, 65536,
+     "Local airport Master states and floating-panel visibility, JSON version 1"},
 };
 
 ESB_Provider* bridgeProvider = nullptr;
@@ -101,7 +105,8 @@ void bridgeSetString(ESB_Aircraft aircraft, CdmBridgeField field, const string& 
 }
 
 void bridgeClearAircraft(ESB_Aircraft aircraft) {
-    for (ESB_FieldId field : bridgeFieldIds) {
+    for (unsigned index = 0; index < BRIDGE_AIRPORT_PANEL; ++index) {
+        ESB_FieldId field = bridgeFieldIds[index];
         if (field != ESB_FIELD_NONE) esb_api->clear_ac(bridgeProvider, aircraft, field);
     }
 }
@@ -131,7 +136,7 @@ void CDM::updateBridge() {
         declaration.struct_size = sizeof declaration;
         declaration.provider_id = "com.viffsys.cdm";
         declaration.schema_major = 1;
-        declaration.schema_minor = 1;
+        declaration.schema_minor = 2;
         declaration.display_name = "CDM Plugin";
         declaration.contact = "https://github.com/IWantPizzaa/CDM";
         declaration.fields = kCdmBridgeFields;
@@ -155,6 +160,18 @@ void CDM::updateBridge() {
                 return;
             }
         }
+    }
+
+    refreshMasterAirports();
+    const auto controller = ControllerMyself();
+    const bool canControl = GetConnectionType() == CONNECTION_TYPE_DIRECT && controller.IsValid() && controller.IsController();
+    const std::string panel = BuildCdmAirportPanel(getCDMAirports(), getMasterAirports(), getServerMasterAirports(),
+        canControl ? controller.GetCallsign() : "", canControl, serverEnabled, showPanel, showAtfcmList, bmiMode,
+        CDMScreen::CapacityAirport(), CDMScreen::PendingMasterAirports());
+    if (panel.empty()) api->clear_global(bridgeProvider, bridgeFieldIds[BRIDGE_AIRPORT_PANEL]);
+    else {
+        ESB_Value value = ESB_Str(panel.c_str());
+        api->set_global(bridgeProvider, bridgeFieldIds[BRIDGE_AIRPORT_PANEL], &value);
     }
 
     unordered_set<string> publishedThisTick;

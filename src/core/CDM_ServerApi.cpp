@@ -677,9 +677,9 @@ void CDM::getCdmServerMasterAirports() {
                 serverMasterAirportsTemp.push_back({airport["icao"].asString(), airport["position"].asString()});
             }
 
-            serverMasterAirports = serverMasterAirportsTemp;
             {
                 std::lock_guard<std::mutex> lock(pendingMasterAirportsMutex);
+                serverMasterAirports = serverMasterAirportsTemp;
                 pendingMasterAirports = std::move(serverMasterAirportsTemp);
                 hasPendingMasterAirports = true;
             }

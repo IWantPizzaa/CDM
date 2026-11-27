@@ -40,6 +40,7 @@ void CDM::refreshMasterAirports() {
                 }
             }
         }
+        std::lock_guard<std::mutex> masterLock(masterAirportsMutex);
         for (const auto& airport : masterAirports) {
             if (std::find(assignedAirports.begin(), assignedAirports.end(), airport) == assignedAirports.end()) {
                 addLogLine("Automatically removed master airport " + airport);
@@ -84,7 +85,7 @@ bool CDM::setMasterAirport(string airport, string position) {
                     if (lineValue == "true") {
                         for (int attempt = 0; attempt < 10; ++attempt) {  // Retry up to 3 times
                             try {
-                                masterAirports.push_back(airport);
+                                { std::lock_guard<std::mutex> masterLock(masterAirportsMutex); masterAirports.push_back(airport); }
                                 sendMessage("Successfully set master airport " + airport);
                                 addLogLine("Successfully set master airport " + airport);
                                 lastAddedIcao = "";
@@ -110,7 +111,7 @@ bool CDM::setMasterAirport(string airport, string position) {
             return false;
         }
     } else {
-        masterAirports.push_back(airport);
+        { std::lock_guard<std::mutex> masterLock(masterAirportsMutex); masterAirports.push_back(airport); }
         sendMessage("Successfully set master airport (Locally only) " + airport);
         addLogLine("Successfully set master airport (Locally only) " + airport);
     }
@@ -129,6 +130,7 @@ bool CDM::removeMasterAirport(string airport, string position) {
 
         if (responseCode == 404 || responseCode == 401 || responseCode == 502 || responseCode == -1) {
             addLogLine("UNABLE TO CONNECT CDM-API...");
+            std::lock_guard<std::mutex> masterLock(masterAirportsMutex);
             for (int a = 0; a < masterAirports.size(); a++) {
                 if (masterAirports[a] == airport) {
                     masterAirports.erase(masterAirports.begin() + a);
@@ -150,6 +152,7 @@ bool CDM::removeMasterAirport(string airport, string position) {
                     sendMessage("Successfully removed master airport (Locally only) " + airport);
                 }
             }
+            std::lock_guard<std::mutex> masterLock(masterAirportsMutex);
             for (int a = 0; a < masterAirports.size(); a++) {
                 if (masterAirports[a] == airport) {
                     masterAirports.erase(masterAirports.begin() + a);
@@ -160,6 +163,7 @@ bool CDM::removeMasterAirport(string airport, string position) {
             }
         }
     } else {
+        std::lock_guard<std::mutex> masterLock(masterAirportsMutex);
         for (int a = 0; a < masterAirports.size(); a++) {
             if (masterAirports[a] == airport) {
                 masterAirports.erase(masterAirports.begin() + a);
@@ -191,7 +195,7 @@ bool CDM::removeAllMasterAirports(string position) {
                     if (lineValue == "true") {
                         addLogLine("Successfully removed all master airports for " + position);
                         sendMessage("Successfully removed all master airports for " + position);
-                        masterAirports.clear();
+                        { std::lock_guard<std::mutex> masterLock(masterAirportsMutex); masterAirports.clear(); }
                         // Update server master list
                         runDetachedTask(&CDM::getCdmServerMasterAirports);
                         return true;
@@ -209,7 +213,7 @@ bool CDM::removeAllMasterAirports(string position) {
     } else {
         addLogLine("Successfully removed all master airports for " + position);
         sendMessage("Successfully removed all master airports for " + position);
-        masterAirports.clear();
+        { std::lock_guard<std::mutex> masterLock(masterAirportsMutex); masterAirports.clear(); }
         return true;
     }
 }

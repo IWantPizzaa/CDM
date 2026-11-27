@@ -169,6 +169,7 @@ inline vector<Rate> rate;
 inline vector<Rate> initialRate;
 inline vector<string> planeAiportList;
 inline vector<string> masterAirports;
+inline std::mutex masterAirportsMutex;
 inline vector<vector<string>> serverMasterAirports;
 inline std::mutex pendingMasterAirportsMutex;
 inline vector<vector<string>> pendingMasterAirports;

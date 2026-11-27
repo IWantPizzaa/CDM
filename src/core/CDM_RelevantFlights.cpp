@@ -99,9 +99,15 @@ vector<vector<string>> CDM::returnRelevantFlights() { return relevantFlights; }
 
 bool CDM::isDepartureAtcOffline(const string& airport) const { return vatsimAtcStatus_.isConfirmedOffline(airport); }
 
-vector<string> CDM::getMasterAirports() { return masterAirports; }
+vector<string> CDM::getMasterAirports() {
+    std::lock_guard<std::mutex> lock(masterAirportsMutex);
+    return masterAirports;
+}
 
-vector<vector<string>> CDM::getServerMasterAirports() { return serverMasterAirports; }
+vector<vector<string>> CDM::getServerMasterAirports() {
+    std::lock_guard<std::mutex> lock(pendingMasterAirportsMutex);
+    return serverMasterAirports;
+}
 
 void CDM::fetchRelevantFlights() { runDetachedTask(&CDM::getCdmServerRelevantFlights); }
 

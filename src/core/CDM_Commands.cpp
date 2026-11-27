@@ -7,6 +7,22 @@
 #include "src/core/CDMGlobals.hpp"
 
 bool CDM::OnCompileCommand(const char* sCommandLine) {
+    if (startsWith(".cdm capacity", sCommandLine)) {
+        std::istringstream input(sCommandLine);
+        std::string prefix, command, airport, extra;
+        input >> prefix >> command >> airport >> extra;
+        boost::to_upper(airport);
+        auto airports = getCDMAirports();
+        const auto localMasters = getMasterAirports();
+        airports.insert(airports.end(), localMasters.begin(), localMasters.end());
+        if (prefix != ".cdm" || command != "capacity" || !extra.empty() ||
+            std::find(airports.begin(), airports.end(), airport) == airports.end()) {
+            sendMessage("Usage: .cdm capacity {configured airport}");
+        } else {
+            CDMScreen::ToggleCapacityViews(airport);
+        }
+        return true;
+    }
     if (startsWith(".cdm refresh", sCommandLine)) {
         addLogLine(sCommandLine);
         sendMessage("Refreshing Now...");
@@ -489,7 +505,7 @@ bool CDM::OnCompileCommand(const char* sCommandLine) {
                 for (size_t i = 2; i < lineAirports.size(); i++) {
                     string addedAirport = lineAirports[i];
                     bool found = false;
-                    for (string apt : masterAirports) {
+                    for (string apt : getMasterAirports()) {
                         if (apt == addedAirport) {
                             found = true;
                         }
@@ -524,7 +540,7 @@ bool CDM::OnCompileCommand(const char* sCommandLine) {
                     string addedAirport = lineAirports[i];
                     bool found = false;
                     int a = 0;
-                    for (string apt : masterAirports) {
+                    for (string apt : getMasterAirports()) {
                         if (apt == addedAirport) {
                             runDetachedTask(&CDM::removeMasterAirport, addedAirport, ATC_Position);
                             found = true;
@@ -660,7 +676,7 @@ bool CDM::OnCompileCommand(const char* sCommandLine) {
         addLogLine(sCommandLine);
         string apts = "";
         if (masterAirports.size() > 0) {
-            for (string apt : masterAirports) {
+            for (string apt : getMasterAirports()) {
                 apts += apt + " ";
             }
             sendMessage("MASTER AIRPORTS: " + apts);

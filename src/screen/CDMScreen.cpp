@@ -18,6 +18,8 @@ extern COLORREF BLOCKS_CALLSIGN_COLOR;
 
 #define RADARSCR_OBJECT_CUSTOM 1000
 
+namespace { std::vector<CDMScreen*> CapacityScreens; }
+
 #define PANEL_WIDTH 290
 #define PANEL_HEADER_HEIGHT 15
 #define BTN_WIDTH 42
@@ -155,6 +157,7 @@ int CDMScreen::CalculatePanelHeight(int airportCount) const {
 }
 
 CDMScreen::CDMScreen(CDM* pCDM) : cdm(pCDM), panelPosition({40, 560}), minimized(false) {
+    CapacityScreens.push_back(this);
     masterAirportPanelRect =
         RECT{panelPosition.x, panelPosition.y, panelPosition.x + PANEL_WIDTH, panelPosition.y + PANEL_HEADER_HEIGHT};
     for (int i = 0; i < MAX_AIRPORTS_DISPLAYED; ++i) {
@@ -178,7 +181,41 @@ CDMScreen::CDMScreen(CDM* pCDM) : cdm(pCDM), panelPosition({40, 560}), minimized
     sortAscending = true;
 }
 
-CDMScreen::~CDMScreen() { this->OnAsrContentToBeSaved(); }
+CDMScreen::~CDMScreen() {
+    CapacityScreens.erase(std::remove(CapacityScreens.begin(), CapacityScreens.end(), this), CapacityScreens.end());
+    this->OnAsrContentToBeSaved();
+}
+
+std::string CDMScreen::CapacityAirport() {
+    for (const auto* screen : CapacityScreens)
+        if (screen->showBlocksPanel) return screen->selectedAirportForBlocks;
+    return {};
+}
+
+std::vector<std::string> CDMScreen::PendingMasterAirports() {
+    std::set<std::string> airports;
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto* screen : CapacityScreens) {
+        const auto masters = screen->cdm->getMasterAirports();
+        for (const auto& [airport, change] : screen->pendingMasterChanges) {
+            const bool local = std::find(masters.begin(), masters.end(), airport) != masters.end();
+            if (local != change.adding && now - change.startTime < std::chrono::seconds(15)) airports.insert(airport);
+        }
+    }
+    return {airports.begin(), airports.end()};
+}
+
+void CDMScreen::CloseCapacityViews() {
+    for (auto* screen : CapacityScreens) screen->HideBlocksWindow();
+}
+
+void CDMScreen::ToggleCapacityViews(const std::string& airport) {
+    const bool close = CapacityAirport() == airport;
+    for (auto* screen : CapacityScreens) {
+        if (close) screen->HideBlocksWindow();
+        else screen->ShowBlocksWindow(airport);
+    }
+}
 
 void CDMScreen::OnAsrContentToBeClosed(void) { delete this; }
 
@@ -186,6 +223,10 @@ void CDMScreen::OnAsrContentToBeSaved(void) {
     cdm->SaveDataToSettings("CDMWindowPositionX", "CDM Window X", std::to_string(panelPosition.x).c_str());
     cdm->SaveDataToSettings("CDMWindowPositionY", "CDM Window Y", std::to_string(panelPosition.y).c_str());
     cdm->SaveDataToSettings("CDMMinimized", "CDM Minimized", minimized ? "1" : "0");
+    cdm->SaveDataToSettings("CDMATFCMX", "ATFCM Window X", std::to_string(flightsPanelPos.x).c_str());
+    cdm->SaveDataToSettings("CDMATFCMY", "ATFCM Window Y", std::to_string(flightsPanelPos.y).c_str());
+    cdm->SaveDataToSettings("CDMCapacityX", "Capacity Window X", std::to_string(blocksPanelPos.x).c_str());
+    cdm->SaveDataToSettings("CDMCapacityY", "Capacity Window Y", std::to_string(blocksPanelPos.y).c_str());
 }
 
 void CDMScreen::OnAsrContentLoaded(bool Loaded) {
@@ -195,6 +236,17 @@ void CDMScreen::OnAsrContentLoaded(bool Loaded) {
         panelPosition.x = std::stoi(savedX);
         panelPosition.y = std::stoi(savedY);
     }
+    const auto loadPosition = [&](const char* xKey, const char* yKey, POINT& position) {
+        try {
+            const char* x = cdm->GetDataFromSettings(xKey);
+            if (!x) return;
+            const long left = std::stoi(x);
+            const char* y = cdm->GetDataFromSettings(yKey);
+            if (y) position = POINT{left, std::stoi(y)};
+        } catch (...) { /* Keep defaults. */ }
+    };
+    loadPosition("CDMATFCMX", "CDMATFCMY", flightsPanelPos);
+    loadPosition("CDMCapacityX", "CDMCapacityY", blocksPanelPos);
     const char* savedMin = cdm->GetDataFromSettings("CDMMinimized");
     if (savedMin) {
         minimized = (std::string(savedMin) == "1");
@@ -312,12 +364,21 @@ void CDMScreen::DrawRelevantFlightsPanel(HDC hDC) {
     std::string flightsFilterText = cdm->getFilterFlightsText();
     auto flights = GetFilteredRelevantFlightsRows();
 
-    int rows = (int)std::min<size_t>(flights.size(), FLT_MAX_ROWS);
+    const RECT bounds = GetRadarArea();
+    const int rowCapacity = std::max(1, std::min(25, static_cast<int>((bounds.bottom - bounds.top - 140) / 20)));
+    const int totalFlights = static_cast<int>(flights.size());
+    flightsPage = std::clamp(flightsPage, 0, totalFlights > 0 ? (totalFlights - 1) / rowCapacity : 0);
+    const int rowStart = flightsPage * rowCapacity;
+    const int rows = std::min(rowCapacity, totalFlights - rowStart);
+    visibleRelevantFlights.assign(flights.begin() + rowStart, flights.begin() + rowStart + rows);
+    flights = visibleRelevantFlights;
     int bodyH = rows * FLT_ROW_HEIGHT + (rows > 0 ? (rows - 1) * FLT_ROW_GAP : 0);
 
     // header + gap + checkbox row + gap + checkbox row + gap + filter row + gap + column header + gap + list + gap
     int panelH = FLT_HEADER_HEIGHT + 6 + 18 + 6 + 18 + 6 + 18 + 6 + 18 + 6 + 18 + 6 + bodyH + 6;
 
+    flightsPanelPos.x = std::clamp(flightsPanelPos.x, bounds.left + 4, std::max(bounds.left + 4L, bounds.right - FLT_PANEL_WIDTH - 4));
+    flightsPanelPos.y = std::clamp(flightsPanelPos.y, bounds.top + 4, std::max(bounds.top + 4L, bounds.bottom - panelH - 4));
     flightsPanelRect =
         RECT{flightsPanelPos.x, flightsPanelPos.y, flightsPanelPos.x + FLT_PANEL_WIDTH, flightsPanelPos.y + panelH};
     flightsHeaderRect = RECT{flightsPanelRect.left, flightsPanelRect.top, flightsPanelRect.right,
@@ -329,7 +390,19 @@ void CDMScreen::DrawRelevantFlightsPanel(HDC hDC) {
     DrawRoundedRect(hDC, flightsHeaderRect, RGB(45, 45, 105));
     SetBkMode(hDC, TRANSPARENT);
     SetTextColor(hDC, RGB(245, 245, 255));
-    DrawTextA(hDC, "ATFCM Flight List", -1, &flightsHeaderRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    const std::string title = "ATFCM Flight List - " + std::to_string(rows ? rowStart + 1 : 0) + "-" +
+        std::to_string(rowStart + rows) + " / " + std::to_string(totalFlights);
+    DrawTextA(hDC, title.c_str(), -1, &flightsHeaderRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    RECT previous{flightsHeaderRect.left, flightsHeaderRect.top, flightsHeaderRect.left + 22, flightsHeaderRect.bottom};
+    RECT next{previous.right, previous.top, previous.right + 22, previous.bottom};
+    if (flightsPage > 0) AddScreenObject(RADARSCR_OBJECT_CUSTOM, "FLT_PREVIOUS", previous, false, "Previous ATFCM flights");
+    if (rowStart + rows < totalFlights) AddScreenObject(RADARSCR_OBJECT_CUSTOM, "FLT_NEXT", next, false, "Next ATFCM flights");
+    DrawCellTextA_Flt(hDC, "<", previous, DT_CENTER, flightsPage > 0 ? RGB(245,245,255) : RGB(100,100,120));
+    DrawCellTextA_Flt(hDC, ">", next, DT_CENTER, rowStart + rows < totalFlights ? RGB(245,245,255) : RGB(100,100,120));
+
+    RECT closeRect{flightsHeaderRect.right - 22, flightsHeaderRect.top, flightsHeaderRect.right, flightsHeaderRect.bottom};
+    AddScreenObject(RADARSCR_OBJECT_CUSTOM, "FLT_CLOSE", closeRect, false, "Close ATFCM panel");
+    DrawCellTextA_Flt(hDC, "X", closeRect, DT_CENTER, RGB(245, 245, 255));
 
     // Checkbox row #1 (Informed filter)
     RECT chkRow = flightsPanelRect;
@@ -689,12 +762,10 @@ void CDMScreen::OnRefresh(HDC hDC, int Phase) {
 
     DrawRelevantFlightsPanel(hDC);
 
-    if (!cdm || !cdm->getPanelStatus()) {
-        return;
-    }
+    if (!cdm) return;
 
     CheckPendingMasterChanges();
-    DrawMasterAirportPanel(hDC);
+    if (cdm->getPanelStatus()) DrawMasterAirportPanel(hDC);
 
     // Draw blocks panel if visible
     if (showBlocksPanel) {
@@ -705,7 +776,7 @@ void CDMScreen::OnRefresh(HDC hDC, int Phase) {
     static auto lastCallTime = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastCallTime).count();
-    if (elapsed >= 30) {
+    if (cdm->getAtfcmList() && elapsed >= 30) {
         lastCallTime = now;
         cdm->fetchRelevantFlights();
     }
@@ -723,9 +794,20 @@ void CDMScreen::ToggleMasterAirport(const std::string& icao) {
 }
 
 void CDMScreen::OnClickScreenObject(int ObjectType, const char* sObjectId, POINT Pt, RECT Area, int Button) {
+    if (strcmp(sObjectId, "FLT_PREVIOUS") == 0 || strcmp(sObjectId, "FLT_NEXT") == 0) {
+        flightsPage = std::max(0, flightsPage + (strcmp(sObjectId, "FLT_NEXT") == 0 ? 1 : -1));
+        RequestRefresh();
+        return;
+    }
+    if (strcmp(sObjectId, "FLT_CLOSE") == 0) {
+        cdm->OnCompileCommand(".cdm atfcm");
+        RequestRefresh();
+        return;
+    }
     // Flights: checkbox (informed)
     if (strcmp(sObjectId, "FLT_CHK_ALL") == 0) {
         showAtfcmAllFlights = !showAtfcmAllFlights;
+        flightsPage = 0;
         RequestRefresh();
         return;
     }
@@ -733,6 +815,7 @@ void CDMScreen::OnClickScreenObject(int ObjectType, const char* sObjectId, POINT
     // Flights: checkbox (CDM / non-CDM)
     if (strcmp(sObjectId, "FLT_CHK_CDM") == 0) {
         showAtfcmAllCdmFlights = !showAtfcmAllCdmFlights;
+        flightsPage = 0;
         RequestRefresh();
         return;
     }
@@ -758,6 +841,7 @@ void CDMScreen::OnClickScreenObject(int ObjectType, const char* sObjectId, POINT
         else {
             sortColumn = col;
             sortAscending = true;
+            flightsPage = 0;
         }
         RequestRefresh();
         return;
@@ -766,7 +850,7 @@ void CDMScreen::OnClickScreenObject(int ObjectType, const char* sObjectId, POINT
     // NEW: clicking EXCL / REA / SIR per-row cells calls a function (like SEND)
     if (strncmp(sObjectId, "FLT_EXCL_", 9) == 0) {
         int idx = atoi(sObjectId + 9);
-        auto flights = GetFilteredRelevantFlightsRows();
+        const auto& flights = visibleRelevantFlights;
         if (idx >= 0 && idx < (int)flights.size()) {
             cdm->setCdmServerStatusFromDialog(flights[(size_t)idx], "EXCL");
         }
@@ -774,7 +858,7 @@ void CDMScreen::OnClickScreenObject(int ObjectType, const char* sObjectId, POINT
     }
     if (strncmp(sObjectId, "FLT_REA_", 8) == 0) {
         int idx = atoi(sObjectId + 8);
-        auto flights = GetFilteredRelevantFlightsRows();
+        const auto& flights = visibleRelevantFlights;
         if (idx >= 0 && idx < (int)flights.size()) {
             cdm->setCdmServerStatusFromDialog(flights[(size_t)idx], "REA");
         }
@@ -782,7 +866,7 @@ void CDMScreen::OnClickScreenObject(int ObjectType, const char* sObjectId, POINT
     }
     if (strncmp(sObjectId, "FLT_SIR_", 8) == 0) {
         int idx = atoi(sObjectId + 8);
-        auto flights = GetFilteredRelevantFlightsRows();
+        const auto& flights = visibleRelevantFlights;
         if (idx >= 0 && idx < (int)flights.size()) {
             cdm->setCdmServerStatusFromDialog(flights[(size_t)idx], "SIR");
         }
@@ -790,7 +874,7 @@ void CDMScreen::OnClickScreenObject(int ObjectType, const char* sObjectId, POINT
     }
     if (strncmp(sObjectId, "FLT_SWM_", 8) == 0) {
         int idx = atoi(sObjectId + 8);
-        auto flights = GetFilteredRelevantFlightsRows();
+        const auto& flights = visibleRelevantFlights;
         if (idx >= 0 && idx < (int)flights.size()) {
             cdm->setCdmServerStatusFromDialog(flights[(size_t)idx], "SWM");
         }
@@ -800,7 +884,7 @@ void CDMScreen::OnClickScreenObject(int ObjectType, const char* sObjectId, POINT
     // Flights: SEND
     if (strncmp(sObjectId, "FLT_ACT_", 8) == 0) {
         int idx = atoi(sObjectId + 8);
-        auto flights = GetFilteredRelevantFlightsRows();
+        const auto& flights = visibleRelevantFlights;
         if (idx >= 0 && idx < (int)flights.size()) {
             cdm->sendAtfcmPrivateMessageToPilotCon(flights[(size_t)idx]);
         }
@@ -834,7 +918,7 @@ void CDMScreen::OnClickScreenObject(int ObjectType, const char* sObjectId, POINT
 
     // Blocks panel interactions
     if (strcmp(sObjectId, "BLOCKS_CLOSE") == 0) {
-        HideBlocksWindow();
+        CloseCapacityViews();
         return;
     }
 
@@ -1046,6 +1130,10 @@ void CDMScreen::ShowBlocksWindow(const std::string& airport) {
     extern bool bmiMode;
     blocksPanelBmiMode = bmiMode;
 
+    if (selectedAirportForBlocks != airport) {
+        pendingBlockChanges.clear(); customBlockCapacities.clear(); calculatedBlockCapacities.clear();
+        selectedBlockIndex = -1; selectedBlockHour = -1; selectedBlockRunway.clear();
+    }
     selectedAirportForBlocks = airport;
     selectedRunwayFilter = "";  // Reset filter when opening
     showBlocksPanel = true;
@@ -1298,6 +1386,9 @@ void CDMScreen::DrawBlocksPanel(HDC hDC) {
     panelHeight += maxBlocks * BLOCKS_ROW_HEIGHT;
     panelHeight += 10;  // Bottom padding
 
+    const RECT bounds = GetRadarArea();
+    blocksPanelPos.x = std::clamp(blocksPanelPos.x, bounds.left + 4, std::max(bounds.left + 4L, bounds.right - BLOCKS_PANEL_WIDTH - 4));
+    blocksPanelPos.y = std::clamp(blocksPanelPos.y, bounds.top + 4, std::max(bounds.top + 4L, bounds.bottom - panelHeight - 4));
     blocksPanelRect =
         RECT{blocksPanelPos.x, blocksPanelPos.y, blocksPanelPos.x + BLOCKS_PANEL_WIDTH, blocksPanelPos.y + panelHeight};
 
@@ -1575,6 +1666,12 @@ void CDMScreen::DrawBlocksPanel(HDC hDC) {
 }
 
 void CDMScreen::ApplyPendingBlockChanges() {
+    if (!cdm || !blocksPanelBmiMode) return;
+    const auto masters = cdm->getMasterAirports();
+    if (std::find(masters.begin(), masters.end(), selectedAirportForBlocks) == masters.end()) {
+        pendingBlockChanges.clear();
+        return;
+    }
     // Apply all pending block capacity changes
     for (const auto& pending : pendingBlockChanges) {
         auto key = std::make_tuple(pending.runway, pending.blockHour, pending.blockIndex);
@@ -1647,6 +1744,7 @@ std::vector<std::pair<std::string, std::string>> CDMScreen::GetCallsignsForBlock
                     CFlightPlan fp = cdm->FlightPlanSelect(plane.callsign.c_str());
                     if (fp.IsValid()) {
                         CFlightPlanData fpData = fp.GetFlightPlanData();
+                        if (std::string(fpData.GetOrigin()) != selectedAirportForBlocks) continue;
                         std::string planeRunway = fpData.GetDepartureRwy();
                         if (planeRunway.empty()) planeRunway = "UNK";
 

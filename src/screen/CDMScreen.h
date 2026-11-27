@@ -65,6 +65,10 @@ class CDMScreen : public CRadarScreen {
     void DrawBlocksPanel(HDC hDC);
     void ShowBlocksWindow(const std::string& airport);
     void HideBlocksWindow();
+    static void ToggleCapacityViews(const std::string& airport);
+    static std::string CapacityAirport();
+    static void CloseCapacityViews();
+    static std::vector<std::string> PendingMasterAirports();
     void UpdateBlocksData(const std::string& airport);
     void RefreshBlocksData();
     void SetRunwayFilter(const std::string& runway);
@@ -98,6 +102,8 @@ class CDMScreen : public CRadarScreen {
     // Flights panel state
     // -----------------------
     POINT flightsPanelPos{40, 640};
+    int flightsPage = 0;
+    std::vector<std::vector<std::string>> visibleRelevantFlights;
     RECT flightsPanelRect{0, 0, 0, 0};
     RECT flightsHeaderRect{0, 0, 0, 0};
     bool showAtfcmAllFlights = false;

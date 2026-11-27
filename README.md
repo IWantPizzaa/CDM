@@ -17,6 +17,10 @@ CDM includes the following times:
 
 ## EuroScope Plugin Bridge
 
+The companion vSMR Runtime Menu consumes the local `airport_panel` JSON field (schema 1.2) to show airport Master states and open CDM's floating ATFCM and runway-capacity/BMI panels. Click an airport to request Master/Slave; right-click it to open its capacity panel. `.cdm capacity ICAO` opens or closes the same panel, using the configured BMI mode. The floating panels remain available when `.cdm panel` hides the original airport grid.
+
+The airport-panel serializer has standalone tests that do not require an API key: configure `tests/airport_panel` with CMake, set `RAPIDJSON_INCLUDE_DIR` if necessary, build and run CTest.
+
 CDM optionally publishes its operational data through the
 [EuroScope Plugin Bridge](https://github.com/AlexisBalzano/Euroscope-Plugin-Bridge).
 The bridge is discovered at runtime, so CDM continues to work normally when it

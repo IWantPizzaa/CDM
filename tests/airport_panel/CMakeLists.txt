@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.15)
+project(CdmAirportPanelTests LANGUAGES CXX)
+enable_testing()
+find_path(RAPIDJSON_INCLUDE_DIR rapidjson/writer.h REQUIRED)
+add_executable(CdmAirportPanelTests test_airport_panel.cpp)
+target_compile_features(CdmAirportPanelTests PRIVATE cxx_std_20)
+target_include_directories(CdmAirportPanelTests PRIVATE ../../src ${RAPIDJSON_INCLUDE_DIR})
+add_test(NAME airport_panel_snapshot COMMAND CdmAirportPanelTests)
