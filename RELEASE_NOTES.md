@@ -1,4 +1,12 @@
-# CDM 2.32b
+# CDM 2.32c
+
+Windows x86 (32-bit) beta for EuroScope. This release restores the vSMR airport
+panel by publishing the `airport_panel` snapshot through EuroScope Plugin Bridge
+schema 1.2. It also exposes Master status and floating panel controls to vSMR.
+Aircraft timing tags remain available as before. Keep the existing CDM XML and
+local configuration files.
+
+## Previous release: 2.32b
 
 Windows x86 (32-bit) beta for EuroScope, integrating the official changes
 through `rpuig2001/CDM` commit `5d47d0d6` after the `v2.32` tag.
