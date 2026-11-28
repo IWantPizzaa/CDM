@@ -9,7 +9,7 @@
 
 using namespace pugi;
 
-void CDM::saveData() {
+void CDM::saveData(vector<Plane> mySlotList) {
     static std::mutex saveDataMutex;
     std::unique_lock<std::mutex> lock(saveDataMutex, std::try_to_lock);
     if (!lock.owns_lock()) return;
@@ -17,7 +17,6 @@ void CDM::saveData() {
     addLogLine("Called saveData...");
     try {
         bool found = false;
-        vector<Plane> mySlotList = slotList;
         for (Plane plane : mySlotList) {
             found = false;
             bool foundData = false;
@@ -31,12 +30,13 @@ void CDM::saveData() {
                         dataString = getFlightStripInfo(fp, 0) + "/" + fp.GetFlightPlanData().GetDepartureRwy() + "/" +
                                      fp.GetFlightPlanData().GetSidName();
                     }
-                    for (int z = 0; z < dataSaved.size(); z++) {
-                        if (dataSaved[z].size() == 2) {
-                            if (plane.callsign == dataSaved[z][0]) {
+                    {
+                        std::lock_guard<std::mutex> dataLock(dataSavedMutex);
+                        for (auto& saved : dataSaved) {
+                            if (saved.size() == 2 && plane.callsign == saved[0]) {
                                 foundData = true;
-                                if (plane.showData && dataString != dataSaved[z][1]) {
-                                    dataSaved[z][1] = dataString;
+                                if (plane.showData && dataString != saved[1]) {
+                                    saved[1] = dataString;
                                     diffDataStored = true;
                                 }
                                 break;
@@ -56,6 +56,7 @@ void CDM::saveData() {
                 updateCdmDataApi(plane);
             }
             if (!foundData && plane.showData) {
+                std::lock_guard<std::mutex> dataLock(dataSavedMutex);
                 dataSaved.push_back({plane.callsign, dataString});
             }
         }
@@ -90,7 +91,7 @@ void CDM::saveData() {
         slotListSaved = nextSlotListSaved;
         if (!ftpHost.empty()) {
             if (!mySlotList.empty()) {
-                for (string airport : masterAirports) {
+                for (const string& airport : getMasterAirports()) {
                     // Type2 -> https://fs.nool.ee/MSFS/VDGS/Specs/DATALINK.txt
                     if (vdgsFileType == "2" || vdgsFileType == "3") {
                         string fileName = dfad + "_" + airport + ".json";
@@ -437,11 +438,12 @@ string CDM::getFromXml(string xpath) {
 }
 
 int CDM::getDeIceId(string callsign) {
-    for (vector<string> deice : deiceList) {
-        if (deice[0] == callsign) {
-            if (deice[2].find("REM") != std::string::npos && deice[2].length() == 4) {
-                return stoi(deice[2].substr(3, 1));
-            } else if (deice[1] == "STND") {
+    for (const auto& deice : snapshotDeiceList()) {
+        if (!deice.empty() && deice[0] == callsign) {
+            if (deice.size() >= 3 && deice[2].size() == 4 && deice[2].compare(0, 3, "REM") == 0 &&
+                deice[2][3] >= '0' && deice[2][3] <= '9') {
+                return deice[2][3] - '0';
+            } else if (deice.size() >= 2 && deice[1] == "STND") {
                 return 0;
             }
         }

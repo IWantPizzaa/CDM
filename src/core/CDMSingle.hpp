@@ -52,7 +52,7 @@
 #endif
 
 #define MY_PLUGIN_NAME "CDM Plugin"
-#define MY_PLUGIN_VERSION "2.32c"
+#define MY_PLUGIN_VERSION "2.32d"
 #define MY_PLUGIN_DEVELOPER "Roger Puig"
 #define MY_PLUGIN_COPYRIGHT "GPL v3"
 #define MY_PLUGIN_VIEW_AVISO "Euroscope CDM"
@@ -137,7 +137,7 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     string GetTimeNow();
 
-    void saveData();
+    void saveData(vector<Plane> slotListSnapshot);
 
     int getPlanePosition(string callsign);
 
@@ -213,17 +213,18 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     void getCdmServerRestricted(vector<Plane> slotListTemp);
 
-    void sendWaitingTOBT();
+    void sendWaitingTOBT(vector<Plane> slotListSnapshot);
 
     void sendWaitingCdmSts();
 
-    void sendWaitingCdmData();
+    void sendWaitingCdmData(vector<Plane> slotListSnapshot);
 
     void sendCheckCIDLater();
 
     void updateCdmDataApi(Plane p);
 
-    void setOBTApi(string callsign, string obt, bool triggeredByUser, bool useEobt);
+    void setOBTApi(string callsign, string obt, bool triggeredByUser, bool useEobt,
+                   vector<Plane> slotListSnapshot);
 
     string getTaxiTime(string callsign);
 
@@ -241,9 +242,9 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     vector<vector<string>> getDepAirportPlanes(string airport);
 
-    void getIffOffBlockTimes();
+    void getIffOffBlockTimes(vector<Plane> slotListSnapshot);
 
-    void getNetworkTobt();
+    void getNetworkTobt(vector<Plane> slotListSnapshot);
 
     vector<vector<string>> getAirportPlanesCdmDataSection(string airport);
 
@@ -298,7 +299,7 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     int getNonCdmTaxiTimeWithPolygonMatch(string airport, string runway, double flightLat, double flightLon);
 
-    void processNonCdmExotFlights();
+    void processNonCdmExotFlights(vector<string> planeAirportSnapshot);
 
     bool sendNonCdmExotMessage(string callsign, string airport, int taxiTimeMinutes);
 
@@ -372,11 +373,11 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     void RemoveMasterAirports();
 
-    vector<Plane> backgroundProcess_recaulculate();
+    vector<Plane> backgroundProcess_recaulculate(vector<Plane> slotListSnapshot);
 
     int ToMinutes(const std::string& hhmm);
 
-    Plane refreshTimes(Plane plane, vector<Plane> planes, CFlightPlan FlightPlan, string callsign, string EOBT,
+    Plane refreshTimes(Plane plane, vector<Plane> planes, const vector<Plane>& allSlots, CFlightPlan FlightPlan, string callsign, string EOBT,
                        string TSATfinal, string TTOTFinal, string origin, int taxiTime, string depRwy, Rate dataRate,
                        bool aircraftFind, bool aicraftInFinalTimesList);
 
@@ -429,9 +430,9 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     void syncAtotToFlightStrip(CFlightPlan FlightPlan, Plane& plane);
 
-    void refreshActions1();
+    void refreshActions1(vector<Plane> slotListSnapshot);
 
-    void refreshActions3();
+    void refreshActions3(vector<Plane> slotListSnapshot);
 
     void refreshMasterAirports();
 
@@ -441,7 +442,7 @@ class CDM : public EuroScopePlugIn::CPlugIn {
 
     void OnFlightPlanControllerAssignedDataUpdate(CFlightPlan flightPlan, int dataType);
 
-    void refreshActions4();
+    void refreshActions4(vector<Plane> slotListSnapshot);
 
     bool setMasterAirport(string airport, string position);
 

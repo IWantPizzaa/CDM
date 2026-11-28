@@ -86,10 +86,10 @@ void CDM::getCdmServerRestricted(vector<Plane> slotListTemp) {
                     }
                 }
                 serverRestrictedPlanes = serverRestrictedPlanesTemp;
-                sendWaitingTOBT();
+                sendWaitingTOBT(slotListTemp);
                 sendWaitingCdmSts();
                 sendCheckCIDLater();
-                sendWaitingCdmData();
+                sendWaitingCdmData(slotListTemp);
                 std::vector<Plane> toAdd;
                 for (Plane p : slotListTemp) {
                     for (int d = 0; d < initialslotListTemp.size(); d++) {
@@ -118,7 +118,7 @@ void CDM::getCdmServerRestricted(vector<Plane> slotListTemp) {
     }
 }
 
-void CDM::sendWaitingTOBT() {
+void CDM::sendWaitingTOBT(vector<Plane> slotListSnapshot) {
     try {
         vector<Plane> setOBTlaterTemp;
         {
@@ -146,7 +146,8 @@ void CDM::sendWaitingTOBT() {
                 if (serverEnabled) {
                     setOBTApi(setOBTlaterTemp[i].callsign, setOBTlaterTemp[i].tsat,
                               setOBTlaterTemp[i].showData,    /*Used as manualTrigger*/
-                              setOBTlaterTemp[i].isCdmAirport /*Used as useEobt*/
+                              setOBTlaterTemp[i].isCdmAirport, /*Used as useEobt*/
+                              slotListSnapshot
                     );
                 }
             }
@@ -173,7 +174,7 @@ void CDM::sendWaitingCdmSts() {
     }
 }
 
-void CDM::sendWaitingCdmData() {
+void CDM::sendWaitingCdmData(vector<Plane> slotListSnapshot) {
     vector<Plane> callsignsToProcess;
     {
         addLogLine("Call sendWaitingCdmData - " + to_string(setCdmDatalater.size()));
@@ -186,7 +187,7 @@ void CDM::sendWaitingCdmData() {
         addLogLine("sendWaitingCdmData - " + plane.callsign);
         Plane currentPlane = plane;
         bool isHidden = false;
-        for (const Plane& current : slotList) {
+        for (const Plane& current : slotListSnapshot) {
             if (current.callsign == plane.callsign) {
                 isHidden = !current.showData;
                 currentPlane = current;
@@ -297,14 +298,21 @@ void CDM::updateCdmDataApi(Plane p) {
     }
 }
 
-void CDM::setOBTApi(string callsign, string obt, bool triggeredByUser, bool useEobt) {
+void CDM::setOBTApi(string callsign, string obt, bool triggeredByUser, bool useEobt,
+                    vector<Plane> slotListSnapshot) {
     addLogLine("Called setOBTApi...");
-    try {
-        vector<Plane> slotListTemp;  // Local copy of the slotList
-        {
-            slotListTemp = slotList;  // Copy the slotList
+    vector<Plane> slotListTemp = std::move(slotListSnapshot);
+    auto restoreShowData = [&] {
+        for (Plane p : slotListTemp) {
+            if (p.callsign == callsign) {
+                p.showData = true;
+                std::lock_guard<std::mutex> lock(apiQueueResponseMutex);
+                apiQueueResponse.push_back(std::move(p));
+                break;
+            }
         }
-
+    };
+    try {
         addLogLine("Call - Set OBT (" + obt + ") for " + callsign + " with triggeredByUser=" +
                    (triggeredByUser ? "true" : "false") + " and useEobt=" + (useEobt ? "true" : "false"));
         if (!isFlightWithinControllerRange(callsign)) {
@@ -419,12 +427,10 @@ void CDM::setOBTApi(string callsign, string obt, bool triggeredByUser, bool useE
         // Add to queue
         std::vector<Plane> toAdd;
         for (Plane p : slotListTemp) {
-            for (int d = 0; d < slotList.size(); d++) {
-                if (p.callsign == slotList[d].callsign) {
-                    p.showData = true;
-                    toAdd.push_back(p);
-                }
-            }
+            if (p.callsign != callsign) continue;
+            p.showData = true;
+            toAdd.push_back(std::move(p));
+            break;
         }
 
         if (!toAdd.empty()) {
@@ -435,34 +441,27 @@ void CDM::setOBTApi(string callsign, string obt, bool triggeredByUser, bool useE
         addLogLine("COMPLETED - setOBTApi for " + callsign);
     } catch (const std::exception& e) {
         addLogLine("ERROR: Unhandled exception setOBTApi: " + (string)e.what());
-        {
-            for (size_t a = 0; a < slotList.size(); a++) {
-                if (slotList[a].callsign == callsign) {
-                    slotList[a].showData = true;
-                }
-            }
-        }
+        restoreShowData();
     } catch (...) {
         addLogLine("ERROR: Unhandled exception setOBTApi");
-        {
-            for (size_t a = 0; a < slotList.size(); a++) {
-                if (slotList[a].callsign == callsign) {
-                    slotList[a].showData = true;
-                }
-            }
-        }
+        restoreShowData();
     }
 }
 
 string CDM::getTaxiTime(string callsign) {
     addLogLine("Call - getTaxiTime");
+    vector<string> taxiTimesSnapshot;
+    {
+        std::lock_guard<std::mutex> lock(taxiTimesListMutex);
+        taxiTimesSnapshot = taxiTimesList;
+    }
     string taxiTime = "15";
-    for (size_t j = 0; j < taxiTimesList.size(); j++) {
-        if (taxiTimesList[j].substr(0, taxiTimesList[j].find(",")) == callsign) {
-            if (taxiTimesList[j].substr(taxiTimesList[j].length() - 2, 1) == ",") {
-                taxiTime = taxiTimesList[j].substr(taxiTimesList[j].length() - 1, 1);
+    for (size_t j = 0; j < taxiTimesSnapshot.size(); j++) {
+        if (taxiTimesSnapshot[j].substr(0, taxiTimesSnapshot[j].find(",")) == callsign) {
+            if (taxiTimesSnapshot[j].substr(taxiTimesSnapshot[j].length() - 2, 1) == ",") {
+                taxiTime = taxiTimesSnapshot[j].substr(taxiTimesSnapshot[j].length() - 1, 1);
             } else {
-                taxiTime = taxiTimesList[j].substr(taxiTimesList[j].length() - 2, 2);
+                taxiTime = taxiTimesSnapshot[j].substr(taxiTimesSnapshot[j].length() - 2, 2);
             }
         }
     }
@@ -696,7 +695,13 @@ void CDM::getNetworkRates() {
     if (serverEnabled) {
         addLogLine("Called getNetworkRates...");
         try {
-            vector<Rate> tempRate = initialRate;
+            vector<Rate> tempRate;
+            uint64_t configGeneration;
+            {
+                std::lock_guard<std::mutex> lock(rateDataMutex);
+                tempRate = initialRate;
+                configGeneration = rateConfigGeneration;
+            }
 
             string url = cdmServerUrl + "/etfms/restrictions?type=DEP";
             std::unordered_map<std::string, std::string> headers = {{"x-api-key", apikey}};
@@ -721,7 +726,7 @@ void CDM::getNetworkRates() {
                         airspace.erase(std::remove(airspace.begin(), airspace.end(), '\n'));
                         airspace.erase(std::remove(airspace.begin(), airspace.end(), '\n'));
                         bool aptFound = false;
-                        for (string apt : masterAirports) {
+                        for (const string& apt : getMasterAirports()) {
                             if (apt == airspace) {
                                 aptFound = true;
                             }
@@ -750,7 +755,8 @@ void CDM::getNetworkRates() {
                                     if (tempRate[i].airport == airspace) {
                                         for (int s = 0; s < tempRate[i].depRwyYes.size(); s++) {
                                             if (tempRate[i].depRwyYes[s] == runway || tempRate[i].depRwyYes[s] == "*") {
-                                                if (tempRate[i].rates.size() > 1) {
+                                                if (static_cast<size_t>(s) < tempRate[i].rates.size() &&
+                                                    tempRate[i].rates.size() > 1) {
                                                     tempRate[i].rates[s] = capacity;
                                                 } else if (tempRate[i].rates.size() == 1) {
                                                     tempRate[i].rates[0] = capacity;
@@ -764,7 +770,10 @@ void CDM::getNetworkRates() {
                     }
                 }
             }
-            rate = tempRate;
+            {
+                std::lock_guard<std::mutex> lock(rateDataMutex);
+                if (configGeneration == rateConfigGeneration) rate = std::move(tempRate);
+            }
             addLogLine("COMPLETED - getNetworkRates");
         } catch (const std::exception& e) {
             addLogLine("ERROR: Unhandled exception getNetworkRates: " + (string)e.what());
@@ -779,7 +788,11 @@ vector<vector<string>> CDM::getDepAirportPlanes(string airport) {
     if (serverEnabled) {
         addLogLine("Called getDepAirportPlanes...");
         try {
-            vector<Rate> tempRate = initialRate;
+            vector<Rate> tempRate;
+            {
+                std::lock_guard<std::mutex> lock(rateDataMutex);
+                tempRate = initialRate;
+            }
 
             string url = cdmServerUrl + "/ifps/depAirport?airport=" + airport;
             std::unordered_map<std::string, std::string> headers = {{"x-api-key", apikey}};
@@ -809,7 +822,8 @@ vector<vector<string>> CDM::getDepAirportPlanes(string airport) {
                     }
                 }
 
-                if (!pilotTobt || find(masterAirports.begin(), masterAirports.end(), airport) == masterAirports.end()) {
+                const auto masters = getMasterAirports();
+                if (!pilotTobt || find(masters.begin(), masters.end(), airport) == masters.end()) {
                     return planes;
                 }
 
@@ -854,14 +868,10 @@ vector<vector<string>> CDM::getDepAirportPlanes(string airport) {
                             informed.erase(std::remove(informed.begin(), informed.end(), '\n'));
                             informed.erase(std::remove(informed.begin(), informed.end(), '\n'));
                             if (informed == "true" || informed == "1") {
-                                bool alreadySent = false;
-                                for (const string& s : messagesSent) {
-                                    if (s == callsign) {
-                                        alreadySent = true;
-                                        break;
-                                    }
+                                std::lock_guard<std::mutex> lock(messagesSentMutex);
+                                if (std::find(messagesSent.begin(), messagesSent.end(), callsign) == messagesSent.end()) {
+                                    messagesSent.push_back(callsign);
                                 }
-                                if (!alreadySent) messagesSent.push_back(callsign);
                             }
                         }
                     }
@@ -876,10 +886,9 @@ vector<vector<string>> CDM::getDepAirportPlanes(string airport) {
     return planes;
 }
 
-void CDM::getIffOffBlockTimes() {
+void CDM::getIffOffBlockTimes(vector<Plane> mySlotList) {
     vector<vector<string>> myObts;
     if (serverEnabled) {
-        vector<Plane> mySlotList = slotList;
         vector<string> airports;
         for (int i = 0; i < mySlotList.size(); i++) {
             CFlightPlan fp1 = FlightPlanSelect(mySlotList[i].callsign.c_str());
@@ -942,23 +951,23 @@ void CDM::getIffOffBlockTimes() {
     obtList = myObts;
 }
 
-void CDM::getNetworkTobt() {
+void CDM::getNetworkTobt(vector<Plane> mySlotList) {
     std::unique_lock<std::mutex> pollLock(networkTobtPollMutex, std::try_to_lock);
     if (serverEnabled && pollLock.owns_lock()) {
         addLogLine("Called getNetworkTobt...");
         vector<vector<string>> planes;
-        vector<string> airports = masterAirports;
+        const auto masters = getMasterAirports();
+        vector<string> airports = masters;
         for (const auto& entry : startupFrequencies) airports.push_back(entry.first);
         sort(airports.begin(), airports.end());
         airports.erase(unique(airports.begin(), airports.end()), airports.end());
         for (const string& airport : airports) {
             vector<vector<string>> newplanes = getDepAirportPlanes(airport);
-            if (pilotTobt && find(masterAirports.begin(), masterAirports.end(), airport) != masterAirports.end()) {
+            if (pilotTobt && find(masters.begin(), masters.end(), airport) != masters.end()) {
                 planes.insert(planes.end(), newplanes.begin(), newplanes.end());
             }
         }
 
-        vector<Plane> mySlotList = slotList;
         std::vector<vector<string>> toAdd;
 
         for (vector<string> plane : planes) {
@@ -1070,7 +1079,11 @@ vector<vector<string>> CDM::getAirportPlanesCdmDataSection(string airport) {
     if (serverEnabled) {
         addLogLine("Called getAirportPlanesCdmDataSection...");
         try {
-            vector<Rate> tempRate = initialRate;
+            vector<Rate> tempRate;
+            {
+                std::lock_guard<std::mutex> lock(rateDataMutex);
+                tempRate = initialRate;
+            }
 
             string url = cdmServerUrl + "/ifps/depAirport?airport=" + airport;
             std::unordered_map<std::string, std::string> headers = {{"x-api-key", apikey}};
@@ -1127,7 +1140,7 @@ vector<vector<string>> CDM::getAirportPlanesCdmDataSection(string airport) {
 void CDM::copyServerSavedData(string airport) {
     if (serverEnabled) {
         addLogLine("Called copyServerSavedData...");
-        for (string apt : masterAirports) {
+        for (const string& apt : getMasterAirports()) {
             if (apt == airport) {
                 sendMessage("Airport: " + airport + ". is already MASTER. Sync not possible.");
                 return;
@@ -1175,7 +1188,7 @@ bool CDM::addMasterAirport(string icao) {
         if (icao.length() == 4) {
             string ATC_Position = ControllerMyself().GetCallsign();
             bool found = false;
-            for (string apt : masterAirports) {
+            for (const string& apt : getMasterAirports()) {
                 if (apt == icao) {
                     found = true;
                 }
@@ -1202,7 +1215,7 @@ bool CDM::clearMasterAirport(string icao) {
             string ATC_Position = ControllerMyself().GetCallsign();
             bool found = false;
             int a = 0;
-            for (string apt : masterAirports) {
+            for (const string& apt : getMasterAirports()) {
                 if (apt == icao) {
                     runDetachedTask(&CDM::removeMasterAirport, icao, ATC_Position);
                     found = true;

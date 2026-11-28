@@ -7,7 +7,12 @@
 
 // CTOT flights remain eligible after TSAT passes until a ground state is set.
 static bool isFrozenSlot(const Plane& p, const string& timeNow) {
-    for (const string& cs : finalTimesList) {
+    vector<string> finalTimesSnapshot;
+    {
+        std::lock_guard<std::mutex> lock(finalTimesListMutex);
+        finalTimesSnapshot = finalTimesList;
+    }
+    for (const string& cs : finalTimesSnapshot) {
         if (cs == p.callsign) return true;
     }
     return !(p.hasManualCtot && !p.ctot.empty()) && p.tsat.length() >= 4 && isdigit((unsigned char)p.tsat[0]) &&
@@ -18,11 +23,25 @@ static const string& sequencingTtot(const Plane& plane) {
     return atotEnabled && !plane.atot.empty() ? plane.atot : plane.ttot;
 }
 
-vector<Plane> CDM::backgroundProcess_recaulculate() {
+vector<Plane> CDM::backgroundProcess_recaulculate(vector<Plane> copySlotList) {
     addLogLine("Called backgroundProcess_recaulculate...");
     try {
+        vector<string> finalTimesSnapshot;
+        vector<string> taxiTimesSnapshot;
+        vector<Delay> delaySnapshot;
+        {
+            std::lock_guard<std::mutex> lock(finalTimesListMutex);
+            finalTimesSnapshot = finalTimesList;
+        }
+        {
+            std::lock_guard<std::mutex> lock(taxiTimesListMutex);
+            taxiTimesSnapshot = taxiTimesList;
+        }
+        {
+            std::lock_guard<std::mutex> lock(delayListMutex);
+            delaySnapshot = delayList;
+        }
         vector<Plane> tempSlotList;
-        vector<Plane> copySlotList = slotList;
         addLogLine("[AUTO] - Starting CDM recalculation process");
         for (size_t i = 0; i < copySlotList.size(); i++) {
             if (!isFlightWithinControllerRange(copySlotList[i].callsign)) {
@@ -64,7 +83,7 @@ vector<Plane> CDM::backgroundProcess_recaulculate() {
 
             // Check if aircraft has state and no need to recalculate
             bool aicraftInFinalTimesList = false;
-            for (string aircraft : finalTimesList) {
+            for (const string& aircraft : finalTimesSnapshot) {
                 if (aircraft == myCallsign) {
                     aicraftInFinalTimesList = true;
                 }
@@ -85,20 +104,20 @@ vector<Plane> CDM::backgroundProcess_recaulculate() {
                 myAirport = myFlightPlan.GetFlightPlanData().GetOrigin();
 
                 bool depRwyFound = false;
-                for (size_t t = 0; t < taxiTimesList.size(); t++) {
-                    if (myCallsign == taxiTimesList[t].substr(0, taxiTimesList[t].find(","))) {
-                        if (taxiTimesList[t].substr(taxiTimesList[t].find(",") + 3, 1) == ",") {
-                            myDepRwy = taxiTimesList[t].substr(taxiTimesList[t].find(",") + 1, 2);
+                for (size_t t = 0; t < taxiTimesSnapshot.size(); t++) {
+                    if (myCallsign == taxiTimesSnapshot[t].substr(0, taxiTimesSnapshot[t].find(","))) {
+                        if (taxiTimesSnapshot[t].substr(taxiTimesSnapshot[t].find(",") + 3, 1) == ",") {
+                            myDepRwy = taxiTimesSnapshot[t].substr(taxiTimesSnapshot[t].find(",") + 1, 2);
                             depRwyFound = true;
-                        } else if (taxiTimesList[t].substr(taxiTimesList[t].find(",") + 4, 1) == ",") {
-                            myDepRwy = taxiTimesList[t].substr(taxiTimesList[t].find(",") + 1, 3);
+                        } else if (taxiTimesSnapshot[t].substr(taxiTimesSnapshot[t].find(",") + 4, 1) == ",") {
+                            myDepRwy = taxiTimesSnapshot[t].substr(taxiTimesSnapshot[t].find(",") + 1, 3);
                             depRwyFound = true;
                         }
 
-                        if (taxiTimesList[t].substr(taxiTimesList[t].length() - 2, 1) == ",") {
-                            myTTime = stoi(taxiTimesList[t].substr(taxiTimesList[t].length() - 1, 1));
+                        if (taxiTimesSnapshot[t].substr(taxiTimesSnapshot[t].length() - 2, 1) == ",") {
+                            myTTime = stoi(taxiTimesSnapshot[t].substr(taxiTimesSnapshot[t].length() - 1, 1));
                         } else {
-                            myTTime = stoi(taxiTimesList[t].substr(taxiTimesList[t].length() - 2, 2));
+                            myTTime = stoi(taxiTimesSnapshot[t].substr(taxiTimesSnapshot[t].length() - 2, 2));
                         }
                     }
                 }
@@ -113,7 +132,7 @@ vector<Plane> CDM::backgroundProcess_recaulculate() {
                 bool tempAddTime_DELAY_TSAT = false;
                 bool tempAddTime_DELAY_TTOT = false;
                 string myTimeToAddTemp_DELAY = "";
-                for (Delay d : delayList) {
+                for (const Delay& d : delaySnapshot) {
                     if (d.airport == myFlightPlan.GetFlightPlanData().GetOrigin() &&
                         d.rwy == myFlightPlan.GetFlightPlanData().GetDepartureRwy()) {
                         if (d.type == "ttot") {
@@ -218,7 +237,7 @@ vector<Plane> CDM::backgroundProcess_recaulculate() {
                 }
 
                 Plane item =
-                    refreshTimes(copySlotList[i], planesToCheck, myFlightPlan, myCallsign, myEOBT, myTSAT, myTTOT,
+                    refreshTimes(copySlotList[i], planesToCheck, copySlotList, myFlightPlan, myCallsign, myEOBT, myTSAT, myTTOT,
                                  myAirport, myTTime, myDepRwy, dataRate, true, aicraftInFinalTimesList);
                 item.atot = copySlotList[i].atot;
                 tempSlotList.push_back(item);
@@ -236,10 +255,10 @@ vector<Plane> CDM::backgroundProcess_recaulculate() {
     } catch (...) {
         addLogLine("ERROR: Unhandled exception backgroundProcess_recaulculate");
     }
-    return slotList;
+    return copySlotList;
 }
 
-Plane CDM::refreshTimes(Plane plane, vector<Plane> planes, CFlightPlan FlightPlan, string callsign, string EOBT,
+Plane CDM::refreshTimes(Plane plane, vector<Plane> planes, const vector<Plane>& allSlots, CFlightPlan FlightPlan, string callsign, string EOBT,
                         string TSATfinal, string TTOTFinal, string origin, int taxiTime, string depRwy, Rate dataRate,
                         bool aircraftFind, bool aicraftInFinalTimesList) {
     try {
@@ -275,12 +294,11 @@ Plane CDM::refreshTimes(Plane plane, vector<Plane> planes, CFlightPlan FlightPla
                     a++;
                 }
             }
-            if (!lvo) {
-                rate = stoi(dataRate.rates[dataRatePos]);
-            } else {
-                rate = stoi(dataRate.ratesLvo[dataRatePos]);
-            }
+            const auto& configuredRates = lvo ? dataRate.ratesLvo : dataRate.rates;
+            if (dataRatePos < 0 || static_cast<size_t>(dataRatePos) >= configuredRates.size()) return plane;
+            rate = stoi(configuredRates[dataRatePos]);
         }
+        if (rate <= 0) return plane;
 
         int runwayPressureValue = 0;
         if (runwayPressureMinutes >= 0) {
@@ -357,7 +375,7 @@ Plane CDM::refreshTimes(Plane plane, vector<Plane> planes, CFlightPlan FlightPla
                         int pressureSeconds = runwayPressureValue * 60;
                         if (plane.hasManualCtot && !plane.ctot.empty()) {
                             unordered_map<string, const Plane*> queuePeers;
-                            for (const Plane& peer : slotList) queuePeers[peer.callsign] = &peer;
+                            for (const Plane& peer : allSlots) queuePeers[peer.callsign] = &peer;
                             for (const Plane& peer : planes) queuePeers[peer.callsign] = &peer;
                             long long totalQueueWaitSeconds = 0;
                             int queuePeerCount = 0;
@@ -415,7 +433,7 @@ Plane CDM::refreshTimes(Plane plane, vector<Plane> planes, CFlightPlan FlightPla
                     }
                     /* START Check stand de-ice */
                     bool standDeice = false;
-                    for (vector<string> deice : deiceList) {
+                    for (const auto& deice : snapshotDeiceList()) {
                         if (deice[0] == callsign) {
                             if (deice[1] == "STND") {
                                 standDeice = true;
@@ -494,7 +512,7 @@ Plane CDM::refreshTimes(Plane plane, vector<Plane> planes, CFlightPlan FlightPla
                                 std::lock_guard<std::mutex> lock(pendingTobtApiUpdatesMutex);
                                 pendingTobtApiUpdates[callsign] = obtToSend;
                             } else {
-                                setOBTApi(callsign, obtToSend, false, false);
+                                setOBTApi(callsign, obtToSend, false, false, allSlots);
                             }
                         }
                     }
@@ -536,6 +554,11 @@ void CDM::clearCustomBlockCapacity(const std::string& runway, int blockHour, int
 string CDM::getCorrectTTOT(string TTOTInitial, bool hasManualCtot, const vector<Plane>& planes, int rateHour,
                            const string& callsign, const string& origin, const string& depRwy, const string& timeNow,
                            double taxiTime, const string& mySid, Rate dataRate, bool& sameOrDependantRwysOut) {
+    vector<string> taxiTimesSnapshot;
+    {
+        std::lock_guard<std::mutex> lock(taxiTimesListMutex);
+        taxiTimesSnapshot = taxiTimesList;
+    }
     string TTOTFinal = TTOTInitial;
     double rateHourMinutes = (double)60 / rateHour;
     bool alreadySetTOStd = false;
@@ -553,13 +576,13 @@ string CDM::getCorrectTTOT(string TTOTInitial, bool hasManualCtot, const vector<
             }
             string listSid = listFlightPlan.GetFlightPlanData().GetSidName();
             bool depRwyFound = false;
-            for (size_t i = 0; i < taxiTimesList.size(); i++) {
-                if (listCallsign == taxiTimesList[i].substr(0, taxiTimesList[i].find(","))) {
-                    if (taxiTimesList[i].substr(taxiTimesList[i].find(",") + 3, 1) == ",") {
-                        listDepRwy = taxiTimesList[i].substr(taxiTimesList[i].find(",") + 1, 2);
+            for (size_t i = 0; i < taxiTimesSnapshot.size(); i++) {
+                if (listCallsign == taxiTimesSnapshot[i].substr(0, taxiTimesSnapshot[i].find(","))) {
+                    if (taxiTimesSnapshot[i].substr(taxiTimesSnapshot[i].find(",") + 3, 1) == ",") {
+                        listDepRwy = taxiTimesSnapshot[i].substr(taxiTimesSnapshot[i].find(",") + 1, 2);
                         depRwyFound = true;
-                    } else if (taxiTimesList[i].substr(taxiTimesList[i].find(",") + 4, 1) == ",") {
-                        listDepRwy = taxiTimesList[i].substr(taxiTimesList[i].find(",") + 1, 3);
+                    } else if (taxiTimesSnapshot[i].substr(taxiTimesSnapshot[i].find(",") + 4, 1) == ",") {
+                        listDepRwy = taxiTimesSnapshot[i].substr(taxiTimesSnapshot[i].find(",") + 1, 3);
                         depRwyFound = true;
                     }
                 }
@@ -690,6 +713,11 @@ string CDM::getCorrectTTOT_Windowed(string TTOTInitial, bool hasManualCtot, cons
                                     const string& callsign, const string& origin, const string& depRwy,
                                     const string& timeNow, double taxiTime, const string& mySid,
                                     bool aicraftInFinalTimesList) {
+    vector<string> taxiTimesSnapshot;
+    {
+        std::lock_guard<std::mutex> lock(taxiTimesListMutex);
+        taxiTimesSnapshot = taxiTimesList;
+    }
     string TTOTFinal = TTOTInitial;
     bool correctTTOT = true;
     bool alreadySetTOStd = false;
@@ -769,13 +797,13 @@ string CDM::getCorrectTTOT_Windowed(string TTOTInitial, bool hasManualCtot, cons
             string listSid = listFlightPlan.GetFlightPlanData().GetSidName();
 
             bool depRwyFound = false;
-            for (size_t i = 0; i < taxiTimesList.size(); i++) {
-                if (listCallsign == taxiTimesList[i].substr(0, taxiTimesList[i].find(","))) {
-                    if (taxiTimesList[i].substr(taxiTimesList[i].find(",") + 3, 1) == ",") {
-                        listDepRwy = taxiTimesList[i].substr(taxiTimesList[i].find(",") + 1, 2);
+            for (size_t i = 0; i < taxiTimesSnapshot.size(); i++) {
+                if (listCallsign == taxiTimesSnapshot[i].substr(0, taxiTimesSnapshot[i].find(","))) {
+                    if (taxiTimesSnapshot[i].substr(taxiTimesSnapshot[i].find(",") + 3, 1) == ",") {
+                        listDepRwy = taxiTimesSnapshot[i].substr(taxiTimesSnapshot[i].find(",") + 1, 2);
                         depRwyFound = true;
-                    } else if (taxiTimesList[i].substr(taxiTimesList[i].find(",") + 4, 1) == ",") {
-                        listDepRwy = taxiTimesList[i].substr(taxiTimesList[i].find(",") + 1, 3);
+                    } else if (taxiTimesSnapshot[i].substr(taxiTimesSnapshot[i].find(",") + 4, 1) == ",") {
+                        listDepRwy = taxiTimesSnapshot[i].substr(taxiTimesSnapshot[i].find(",") + 1, 3);
                         depRwyFound = true;
                     }
                 }

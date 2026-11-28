@@ -7,31 +7,24 @@
 
 void CDM::setDeice(string remText, CFlightPlan fp, string index) {
     addLogLine("TRIGGER - TAG_FUNC_DEICE_" + remText);
+    const string callsign = fp.GetCallsign();
 
-    bool found = false;
-    for (size_t i = 0; i < deiceList.size(); i++) {
-        if (deiceList[i][0] == fp.GetCallsign()) {
-            found = true;
-        }
+    {
+        std::lock_guard<std::mutex> lock(deiceListMutex);
+        deiceList.erase(std::remove_if(deiceList.begin(), deiceList.end(), [&](const auto& entry) {
+            return !entry.empty() && entry[0] == callsign;
+        }), deiceList.end());
+        deiceList.push_back({callsign, remText, index});
     }
-
-    if (found) {
-        // Remove plane from deice list
-        for (size_t i = 0; i < deiceList.size(); i++) {
-            if (deiceList[i][0] == fp.GetCallsign()) {
-                deiceList.erase(deiceList.begin() + i);
-            }
-        }
-    }
-
-    deiceList.push_back({fp.GetCallsign(), remText, index});
     setFlightStripInfo(fp, remText, 5);
 
     // Remove plane from taxiTimesList
-    for (size_t j = 0; j < taxiTimesList.size(); j++) {
-        if (taxiTimesList[j].substr(0, taxiTimesList[j].find(",")) == fp.GetCallsign()) {
-            taxiTimesList.erase(taxiTimesList.begin() + j);
-        }
+    {
+        std::lock_guard<std::mutex> lock(taxiTimesListMutex);
+        taxiTimesList.erase(std::remove_if(taxiTimesList.begin(), taxiTimesList.end(),
+                                           [&](const string& entry) {
+                                               return entry.substr(0, entry.find(",")) == fp.GetCallsign();
+                                           }), taxiTimesList.end());
     }
 
     // Remove plane from slotlist to recalculate times
@@ -118,31 +111,29 @@ void CDM::RemoveDataFromTfc(string callsign) {
             }
         }
 
-        // Remove Plane From finalTimesList (fix iterator invalidation: only increment if no erase)
-        for (size_t i = 0; i < finalTimesList.size();) {
-            if (finalTimesList[i] == callsign) {
-                if (debugMode) {
-                    sendMessage("[DEBUG MESSAGE] - " + callsign + " REMOVED 6");
-                }
-                finalTimesList.erase(finalTimesList.begin() + i);
-                // Don't increment i - next element shifts into current position
-            } else {
-                i++;
-            }
+        // Remove Plane From finalTimesList
+        size_t removedFinalTimes = 0;
+        {
+            std::lock_guard<std::mutex> lock(finalTimesListMutex);
+            const auto oldSize = finalTimesList.size();
+            finalTimesList.erase(std::remove(finalTimesList.begin(), finalTimesList.end(), callsign),
+                                 finalTimesList.end());
+            removedFinalTimes = oldSize - finalTimesList.size();
         }
+        if (debugMode && removedFinalTimes) sendMessage("[DEBUG MESSAGE] - " + callsign + " REMOVED 6");
 
-        // Remove Taxi Times List (fix iterator invalidation: only increment if no erase)
-        for (size_t j = 0; j < taxiTimesList.size();) {
-            if (taxiTimesList[j].substr(0, taxiTimesList[j].find(",")) == callsign) {
-                if (debugMode) {
-                    sendMessage("[DEBUG MESSAGE] - " + callsign + " REMOVED 7");
-                }
-                taxiTimesList.erase(taxiTimesList.begin() + j);
-                // Don't increment j - next element shifts into current position
-            } else {
-                j++;
-            }
+        // Remove Taxi Times List
+        size_t removedTaxiTimes = 0;
+        {
+            std::lock_guard<std::mutex> lock(taxiTimesListMutex);
+            const auto oldSize = taxiTimesList.size();
+            taxiTimesList.erase(std::remove_if(taxiTimesList.begin(), taxiTimesList.end(),
+                                               [&](const string& entry) {
+                                                   return entry.substr(0, entry.find(",")) == callsign;
+                                               }), taxiTimesList.end());
+            removedTaxiTimes = oldSize - taxiTimesList.size();
         }
+        if (debugMode && removedTaxiTimes) sendMessage("[DEBUG MESSAGE] - " + callsign + " REMOVED 7");
 
         // Remove ctotCheck
         for (size_t i = 0; i < CTOTcheck.size(); i++) {
@@ -241,23 +232,29 @@ void CDM::RemoveDataFromTfc(string callsign) {
         }
 
         // Remove from deiceList
-        for (size_t i = 0; i < deiceList.size(); i++) {
-            if (callsign == deiceList[i][0]) {
-                if (debugMode) {
-                    sendMessage("[DEBUG MESSAGE] - " + callsign + " REMOVED 16");
-                }
-                deiceList.erase(deiceList.begin() + i);
-            }
+        bool removedDeice = false;
+        {
+            std::lock_guard<std::mutex> lock(deiceListMutex);
+            const auto oldSize = deiceList.size();
+            deiceList.erase(std::remove_if(deiceList.begin(), deiceList.end(), [&](const auto& entry) {
+                return !entry.empty() && entry[0] == callsign;
+            }), deiceList.end());
+            removedDeice = deiceList.size() != oldSize;
         }
+        if (removedDeice && debugMode) sendMessage("[DEBUG MESSAGE] - " + callsign + " REMOVED 16");
         // Remove from dataSaved
-        for (size_t i = 0; i < dataSaved.size(); i++) {
-            if (callsign == dataSaved[i][0]) {
-                if (debugMode) {
-                    sendMessage("[DEBUG MESSAGE] - " + callsign + " REMOVED 19");
+        bool removedSavedData = false;
+        {
+            std::lock_guard<std::mutex> dataLock(dataSavedMutex);
+            for (size_t i = 0; i < dataSaved.size(); i++) {
+                if (!dataSaved[i].empty() && callsign == dataSaved[i][0]) {
+                    dataSaved.erase(dataSaved.begin() + i);
+                    removedSavedData = true;
+                    break;
                 }
-                dataSaved.erase(dataSaved.begin() + i);
             }
         }
+        if (removedSavedData && debugMode) sendMessage("[DEBUG MESSAGE] - " + callsign + " REMOVED 19");
         // Remove from obtList
         for (size_t i = 0; i < obtList.size(); i++) {
             if (callsign == obtList[i][0]) {
@@ -277,14 +274,16 @@ void CDM::RemoveDataFromTfc(string callsign) {
             }
         }
         // Remove from messagesSent
-        for (size_t i = 0; i < messagesSent.size(); i++) {
-            if (callsign == messagesSent[i]) {
-                if (debugMode) {
-                    sendMessage("[DEBUG MESSAGE] - " + callsign + " REMOVED 22");
-                }
-                messagesSent.erase(messagesSent.begin() + i);
+        bool removedMessage = false;
+        {
+            std::lock_guard<std::mutex> lock(messagesSentMutex);
+            const auto found = std::find(messagesSent.begin(), messagesSent.end(), callsign);
+            if (found != messagesSent.end()) {
+                messagesSent.erase(found);
+                removedMessage = true;
             }
         }
+        if (removedMessage && debugMode) sendMessage("[DEBUG MESSAGE] - " + callsign + " REMOVED 22");
 
         // Remove from non-CDM EXOT flights list
         {

@@ -69,12 +69,13 @@ void CDM::processVsidRequests() {
         std::lock_guard<std::mutex> lock(startupRequestsMutex);
         requests = vsidRequests;
     }
+    const auto masters = getMasterAirports();
     for (auto sent = vsidDispatchedRequests.begin(); sent != vsidDispatchedRequests.end();) {
         const auto separator = sent->first.find('|');
         const string airport = sent->first.substr(0, separator);
         const string callsign = sent->first.substr(separator + 1);
         const auto airportRequests = requests.find(airport);
-        if (find(masterAirports.begin(), masterAirports.end(), airport) == masterAirports.end() ||
+        if (find(masters.begin(), masters.end(), airport) == masters.end() ||
             airportRequests == requests.end() ||
             airportRequests->second.find(callsign) == airportRequests->second.end() ||
             airportRequests->second.at(callsign) != sent->second) {
@@ -85,7 +86,7 @@ void CDM::processVsidRequests() {
     }
 
     for (const auto& airport : requests) {
-        if (find(masterAirports.begin(), masterAirports.end(), airport.first) == masterAirports.end()) continue;
+        if (find(masters.begin(), masters.end(), airport.first) == masters.end()) continue;
         for (const auto& request : airport.second) {
             const string key = airport.first + "|" + request.first;
             if (vsidDispatchedRequests.find(key) != vsidDispatchedRequests.end() ||
@@ -147,7 +148,8 @@ void CDM::tryAutoSetStup(CFlightPlan fp, Plane flight) {
     }
 
     const string origin = fp.GetFlightPlanData().GetOrigin();
-    if (std::find(masterAirports.begin(), masterAirports.end(), origin) == masterAirports.end()) {
+    const auto masters = getMasterAirports();
+    if (std::find(masters.begin(), masters.end(), origin) == masters.end()) {
         return;
     }
     if (string(fp.GetTrackingControllerCallsign()) != "" && !fp.GetTrackingControllerIsMe()) {
@@ -274,29 +276,33 @@ void CDM::syncAtotToFlightStrip(CFlightPlan FlightPlan, Plane& plane) {
     }
 }
 
-void CDM::refreshActions1() {
-    refresh1 = true;
-    readyToUpdateList = false;
-    // Execute background process in the background
-    slotListToUpdate = backgroundProcess_recaulculate();
-    // Check rates
-    getNetworkRates();
-    readyToUpdateList = true;
-    refresh1 = false;
+void CDM::refreshActions1(vector<Plane> slotListSnapshot) {
+    try {
+        vector<Plane> updated = backgroundProcess_recaulculate(std::move(slotListSnapshot));
+        getNetworkRates();
+        std::lock_guard<std::mutex> lock(refreshStateMutex);
+        slotListToUpdate = std::move(updated);
+        readyToUpdateList = true;
+        refresh1 = false;
+    } catch (...) {
+        std::lock_guard<std::mutex> lock(refreshStateMutex);
+        refresh1 = false;
+        throw;
+    }
 }
 
-void CDM::refreshActions3() {
+void CDM::refreshActions3(vector<Plane> slotListSnapshot) {
     addLogLine("[AUTO] - REFRESH API 1");
-    getCdmServerRestricted(slotList);
+    getCdmServerRestricted(std::move(slotListSnapshot));
     getCdmServerMasterAirports();
     getCdmServerRelevantFlights();
     getCdmServerOnTime();
     refresh3 = false;
 }
 
-void CDM::refreshActions4() {
+void CDM::refreshActions4(vector<Plane> slotListSnapshot) {
     addLogLine("[AUTO] - REFRESH API 2");
     getCdmServerStatus();
-    getIffOffBlockTimes();
+    getIffOffBlockTimes(std::move(slotListSnapshot));
     refresh4 = false;
 }

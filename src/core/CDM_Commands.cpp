@@ -7,6 +7,21 @@
 #include "src/core/CDMGlobals.hpp"
 
 bool CDM::OnCompileCommand(const char* sCommandLine) {
+    auto removeDelayForRunway = [](const string& airport, const string& runway) {
+        std::lock_guard<std::mutex> lock(delayListMutex);
+        const size_t oldSize = delayList.size();
+        delayList.erase(std::remove_if(delayList.begin(), delayList.end(), [&](const Delay& d) {
+            return d.airport == airport && d.rwy == runway;
+        }), delayList.end());
+        return oldSize - delayList.size();
+    };
+    auto replaceDelayForRunway = [&](const Delay& replacement) {
+        std::lock_guard<std::mutex> lock(delayListMutex);
+        delayList.erase(std::remove_if(delayList.begin(), delayList.end(), [&](const Delay& d) {
+            return d.airport == replacement.airport && d.rwy == replacement.rwy;
+        }), delayList.end());
+        delayList.push_back(replacement);
+    };
     if (startsWith(".cdm capacity", sCommandLine)) {
         std::istringstream input(sCommandLine);
         std::string prefix, command, airport, extra;
@@ -282,27 +297,17 @@ bool CDM::OnCompileCommand(const char* sCommandLine) {
             if (isTimeOk) {
                 // use myTime 9999 to remove delay for APT/RWY config
                 if (myTime == "9999") {
-                    for (size_t i = 0; i < delayList.size(); i++) {
-                        if (delayList[i].airport == apt && delayList[i].rwy == rwy) {
-                            sendMessage("REMOVING START-UP DELAY " + apt + "/" + rwy);
-                            delayList.erase(delayList.begin() + i);
-                        }
-                    }
+                    if (removeDelayForRunway(apt, rwy))
+                        sendMessage("REMOVING START-UP DELAY " + apt + "/" + rwy);
                 } else {
                     Delay d = Delay(apt, rwy, myTime, "tsat");
                     string timeNow = GetActualTime();
                     int difTime = difftime(stoi(d.time), stoi(timeNow));
 
                     if (difTime > 0) {
-                        // Remove existing delay for the same airport and runway
-                        for (size_t i = 0; i < delayList.size(); i++) {
-                            if (delayList[i].airport == apt && delayList[i].rwy == rwy) {
-                                delayList.erase(delayList.begin() + i);
-                            }
-                        }
+                        replaceDelayForRunway(d);
                         sendMessage("Adding START-UP DELAY for " + apt + " rwy: " + rwy + " from time: " + myTime +
                                     "z.");
-                        delayList.push_back(d);
                         // Update times to slaves
                         countTime = std::time(nullptr) - refreshTime;
                         // addTimeToListForSpecificAirportAndRunway(difTime, GetTimeNow(), d.airport, d.rwy);
@@ -363,27 +368,17 @@ bool CDM::OnCompileCommand(const char* sCommandLine) {
             if (isTimeOk) {
                 // use myTime 9999 to remove delay for APT/RWY config
                 if (myTime == "9999") {
-                    for (size_t i = 0; i < delayList.size(); i++) {
-                        if (delayList[i].airport == apt && delayList[i].rwy == rwy) {
-                            sendMessage("REMOVING DEPARTURE DELAY " + apt + "/" + rwy);
-                            delayList.erase(delayList.begin() + i);
-                        }
-                    }
+                    if (removeDelayForRunway(apt, rwy))
+                        sendMessage("REMOVING DEPARTURE DELAY " + apt + "/" + rwy);
                 } else {
                     Delay d = Delay(apt, rwy, myTime, "ttot");
                     string timeNow = GetActualTime();
                     int difTime = difftime(stoi(d.time), stoi(timeNow));
 
                     if (difTime > 0) {
-                        // Remove existing delay for the same airport and runway
-                        for (size_t i = 0; i < delayList.size(); i++) {
-                            if (delayList[i].airport == apt && delayList[i].rwy == rwy) {
-                                delayList.erase(delayList.begin() + i);
-                            }
-                        }
+                        replaceDelayForRunway(d);
                         sendMessage("Adding DEPARTURE DELAY for " + apt + " rwy: " + rwy + " from time: " + myTime +
                                     "z.");
-                        delayList.push_back(d);
                         // Update times to slaves
                         countTime = std::time(nullptr) - refreshTime;
                         // addTimeToListForSpecificAirportAndRunway(difTime, GetTimeNow(), d.airport, d.rwy);
@@ -675,8 +670,9 @@ bool CDM::OnCompileCommand(const char* sCommandLine) {
     if (startsWith(".cdm status", sCommandLine)) {
         addLogLine(sCommandLine);
         string apts = "";
-        if (masterAirports.size() > 0) {
-            for (string apt : getMasterAirports()) {
+        const auto masters = getMasterAirports();
+        if (!masters.empty()) {
+            for (const auto& apt : masters) {
                 apts += apt + " ";
             }
             sendMessage("MASTER AIRPORTS: " + apts);

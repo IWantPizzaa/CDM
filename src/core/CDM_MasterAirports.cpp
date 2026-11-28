@@ -40,23 +40,27 @@ void CDM::refreshMasterAirports() {
                 }
             }
         }
-        std::lock_guard<std::mutex> masterLock(masterAirportsMutex);
-        for (const auto& airport : masterAirports) {
+        vector<string> previousMasters;
+        {
+            std::lock_guard<std::mutex> masterLock(masterAirportsMutex);
+            previousMasters = masterAirports;
+            if (masterAirports != assignedAirports) masterAirports = assignedAirports;
+        }
+        for (const auto& airport : previousMasters) {
             if (std::find(assignedAirports.begin(), assignedAirports.end(), airport) == assignedAirports.end()) {
                 addLogLine("Automatically removed master airport " + airport);
                 sendMessage("Automatically removed master airport " + airport);
             }
         }
         for (const auto& airport : assignedAirports) {
-            if (std::find(masterAirports.begin(), masterAirports.end(), airport) == masterAirports.end()) {
+            if (std::find(previousMasters.begin(), previousMasters.end(), airport) == previousMasters.end()) {
                 addLogLine("Automatically set master airport " + airport);
                 sendMessage("Automatically set master airport " + airport);
             }
         }
-        if (masterAirports != assignedAirports) {
+        if (previousMasters != assignedAirports) {
             tagItemDisplayCache.clear();
         }
-        masterAirports = std::move(assignedAirports);
     }
 
     static auto lastFetch = std::chrono::steady_clock::time_point{};
@@ -122,6 +126,13 @@ bool CDM::setMasterAirport(string airport, string position) {
 
 bool CDM::removeMasterAirport(string airport, string position) {
     addLogLine("Call - Remove Master airport " + airport + "(" + position + ")");
+    const auto removeLocal = [&] {
+        std::lock_guard<std::mutex> masterLock(masterAirportsMutex);
+        const auto found = std::find(masterAirports.begin(), masterAirports.end(), airport);
+        if (found == masterAirports.end()) return false;
+        masterAirports.erase(found);
+        return true;
+    };
     if (serverEnabled) {
         string url = cdmServerUrl + "/airport/removeMaster?airport=" + airport + "&position=" + position;
         std::unordered_map<std::string, std::string> headers = {{"x-api-key", apikey}};
@@ -130,14 +141,10 @@ bool CDM::removeMasterAirport(string airport, string position) {
 
         if (responseCode == 404 || responseCode == 401 || responseCode == 502 || responseCode == -1) {
             addLogLine("UNABLE TO CONNECT CDM-API...");
-            std::lock_guard<std::mutex> masterLock(masterAirportsMutex);
-            for (int a = 0; a < masterAirports.size(); a++) {
-                if (masterAirports[a] == airport) {
-                    masterAirports.erase(masterAirports.begin() + a);
-                    addLogLine("Successfully removed master airport (Locally only) " + airport);
-                    sendMessage("Successfully removed master airport (Locally only) " + airport);
-                    return true;
-                }
+            if (removeLocal()) {
+                addLogLine("Successfully removed master airport (Locally only) " + airport);
+                sendMessage("Successfully removed master airport (Locally only) " + airport);
+                return true;
             }
         } else {
             std::istringstream is(response.body);
@@ -152,25 +159,17 @@ bool CDM::removeMasterAirport(string airport, string position) {
                     sendMessage("Successfully removed master airport (Locally only) " + airport);
                 }
             }
-            std::lock_guard<std::mutex> masterLock(masterAirportsMutex);
-            for (int a = 0; a < masterAirports.size(); a++) {
-                if (masterAirports[a] == airport) {
-                    masterAirports.erase(masterAirports.begin() + a);
-                    // Update server master list
-                    runDetachedTask(&CDM::getCdmServerMasterAirports);
-                    return true;
-                }
+            if (removeLocal()) {
+                // Update server master list after releasing the Master lock.
+                runDetachedTask(&CDM::getCdmServerMasterAirports);
+                return true;
             }
         }
     } else {
-        std::lock_guard<std::mutex> masterLock(masterAirportsMutex);
-        for (int a = 0; a < masterAirports.size(); a++) {
-            if (masterAirports[a] == airport) {
-                masterAirports.erase(masterAirports.begin() + a);
-                addLogLine("Successfully removed master airport (Locally only) " + airport);
-                sendMessage("Successfully removed master airport (Locally only) " + airport);
-                return true;
-            }
+        if (removeLocal()) {
+            addLogLine("Successfully removed master airport (Locally only) " + airport);
+            sendMessage("Successfully removed master airport (Locally only) " + airport);
+            return true;
         }
     }
     return false;

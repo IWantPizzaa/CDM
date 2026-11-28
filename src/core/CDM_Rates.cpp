@@ -60,14 +60,16 @@ bool CDM::getRateFromUrl(string url) {
                 vector<string> ratesFromDataRunwayPressure;
                 if (ratesFromData.size() == 0) {
                     ratesFromData.push_back(data[8]);
-                } else {
-                    for (string completeRate : ratesFromData) {
-                        vector<string> tempCompleteRate = explode(completeRate, '_');
-                        ratesFromDataRate.push_back(tempCompleteRate[0]);
-                        ratesFromDataRateLvo.push_back(tempCompleteRate[1]);
-                        ratesFromDataRunwayPressure.push_back(tempCompleteRate.size() > 2 ? tempCompleteRate[2] : "");
-                    }
                 }
+                for (const string& completeRate : ratesFromData) {
+                    vector<string> tempCompleteRate = explode(completeRate, '_');
+                    if (tempCompleteRate.size() < 2 || tempCompleteRate[0].empty() ||
+                        tempCompleteRate[1].empty()) continue;
+                    ratesFromDataRate.push_back(tempCompleteRate[0]);
+                    ratesFromDataRateLvo.push_back(tempCompleteRate[1]);
+                    ratesFromDataRunwayPressure.push_back(tempCompleteRate.size() > 2 ? tempCompleteRate[2] : "");
+                }
+                if (ratesFromDataRate.empty()) continue;
 
                 Rate myRate(myRateDataAirport, ArrRwyList, NotArrRwyList, DepRwyList, NotDepRwyList, DependentRwyList,
                             ratesFromDataRate, ratesFromDataRateLvo, ratesFromDataRunwayPressure);
@@ -88,7 +90,12 @@ bool CDM::getRateFromUrl(string url) {
     }
     bool runwayPressureChanged = false;
     vector<Rate> ratesChanged;
-    for (Rate r1 : rate) {
+    vector<Rate> previousRates;
+    {
+        std::lock_guard<std::mutex> lock(rateDataMutex);
+        previousRates = rate;
+    }
+    for (Rate r1 : previousRates) {
         for (Rate r2 : myRates) {
             if (r1.airport == r2.airport && r1.arrRwyNo == r2.arrRwyNo && r1.arrRwyYes == r2.arrRwyYes &&
                 r1.dependentRwy == r2.dependentRwy && r1.depRwyNo == r2.depRwyNo && r1.depRwyYes == r2.depRwyYes) {
@@ -139,8 +146,12 @@ bool CDM::getRateFromUrl(string url) {
         }
     }
 
-    rate = myRates;
-    initialRate = rate;
+    {
+        std::lock_guard<std::mutex> lock(rateDataMutex);
+        rate = myRates;
+        initialRate = rate;
+        ++rateConfigGeneration;
+    }
     if (runwayPressureChanged) countTime = std::time(nullptr) - refreshTime;
 
     return true;
@@ -188,14 +199,16 @@ bool CDM::getRate() {
             vector<string> ratesFromDataRunwayPressure;
             if (ratesFromData.size() == 0) {
                 ratesFromData.push_back(data[8]);
-            } else {
-                for (string completeRate : ratesFromData) {
-                    vector<string> tempCompleteRate = explode(completeRate, '_');
-                    ratesFromDataRate.push_back(tempCompleteRate[0]);
-                    ratesFromDataRateLvo.push_back(tempCompleteRate[1]);
-                    ratesFromDataRunwayPressure.push_back(tempCompleteRate.size() > 2 ? tempCompleteRate[2] : "");
-                }
             }
+            for (const string& completeRate : ratesFromData) {
+                vector<string> tempCompleteRate = explode(completeRate, '_');
+                if (tempCompleteRate.size() < 2 || tempCompleteRate[0].empty() ||
+                    tempCompleteRate[1].empty()) continue;
+                ratesFromDataRate.push_back(tempCompleteRate[0]);
+                ratesFromDataRateLvo.push_back(tempCompleteRate[1]);
+                ratesFromDataRunwayPressure.push_back(tempCompleteRate.size() > 2 ? tempCompleteRate[2] : "");
+            }
+            if (ratesFromDataRate.empty()) continue;
 
             Rate myRate(myRateDataAirport, ArrRwyList, NotArrRwyList, DepRwyList, NotDepRwyList, DependentRwyList,
                         ratesFromDataRate, ratesFromDataRateLvo, ratesFromDataRunwayPressure);
@@ -215,7 +228,12 @@ bool CDM::getRate() {
     }
     bool runwayPressureChanged = false;
     vector<Rate> ratesChanged;
-    for (Rate r1 : rate) {
+    vector<Rate> previousRates;
+    {
+        std::lock_guard<std::mutex> lock(rateDataMutex);
+        previousRates = rate;
+    }
+    for (Rate r1 : previousRates) {
         for (Rate r2 : myRates) {
             if (r1.airport == r2.airport && r1.arrRwyNo == r2.arrRwyNo && r1.arrRwyYes == r2.arrRwyYes &&
                 r1.dependentRwy == r2.dependentRwy && r1.depRwyNo == r2.depRwyNo && r1.depRwyYes == r2.depRwyYes) {
@@ -266,8 +284,12 @@ bool CDM::getRate() {
         }
     }
 
-    rate = myRates;
-    initialRate = rate;
+    {
+        std::lock_guard<std::mutex> lock(rateDataMutex);
+        rate = myRates;
+        initialRate = rate;
+        ++rateConfigGeneration;
+    }
     if (runwayPressureChanged) countTime = std::time(nullptr) - refreshTime;
 
     return true;
@@ -284,36 +306,62 @@ Rate CDM::rateForRunway(string airport, string depRwy, string mySid) {
     static unordered_map<string, vector<string>> activeDepRwyCache;
     static unordered_map<string, vector<string>> activeArrRwyCache;
     static time_t activeRwyCacheTime = 0;
+    static std::mutex activeRwyCacheMutex;
     time_t rwyCacheNow = std::time(nullptr);
-    if (rwyCacheNow - activeRwyCacheTime > 5) {
-        activeDepRwyCache.clear();
-        activeArrRwyCache.clear();
+    vector<string> myActiveRwysDep;
+    vector<string> myActiveRwysArr;
+    bool refreshCache;
+    {
+        std::lock_guard<std::mutex> lock(activeRwyCacheMutex);
+        refreshCache = rwyCacheNow - activeRwyCacheTime > 5;
+        if (!refreshCache) {
+            auto dep = activeDepRwyCache.find(airport);
+            auto arr = activeArrRwyCache.find(airport);
+            if (dep != activeDepRwyCache.end()) myActiveRwysDep = dep->second;
+            if (arr != activeArrRwyCache.end()) myActiveRwysArr = arr->second;
+        }
+    }
+    if (refreshCache) {
+        unordered_map<string, vector<string>> newDepRwyCache;
+        unordered_map<string, vector<string>> newArrRwyCache;
         string myairport;
         for (CSectorElement runway = this->SectorFileElementSelectFirst(SECTOR_ELEMENT_RUNWAY); runway.IsValid();
              runway = this->SectorFileElementSelectNext(runway, SECTOR_ELEMENT_RUNWAY)) {
             if (runway.IsElementActive(false, 1)) {
                 myairport = runway.GetAirportName();
-                activeArrRwyCache[myairport.substr(0, 4)].push_back(runway.GetRunwayName(1));
+                newArrRwyCache[myairport.substr(0, 4)].push_back(runway.GetRunwayName(1));
             }
             if (runway.IsElementActive(false, 0)) {
                 myairport = runway.GetAirportName();
-                activeArrRwyCache[myairport.substr(0, 4)].push_back(runway.GetRunwayName(0));
+                newArrRwyCache[myairport.substr(0, 4)].push_back(runway.GetRunwayName(0));
             }
             if (runway.IsElementActive(true, 1)) {
                 myairport = runway.GetAirportName();
-                activeDepRwyCache[myairport.substr(0, 4)].push_back(runway.GetRunwayName(1));
+                newDepRwyCache[myairport.substr(0, 4)].push_back(runway.GetRunwayName(1));
             }
             if (runway.IsElementActive(true, 0)) {
                 myairport = runway.GetAirportName();
-                activeDepRwyCache[myairport.substr(0, 4)].push_back(runway.GetRunwayName(0));
+                newDepRwyCache[myairport.substr(0, 4)].push_back(runway.GetRunwayName(0));
             }
         }
-        activeRwyCacheTime = rwyCacheNow;
+        std::lock_guard<std::mutex> lock(activeRwyCacheMutex);
+        if (rwyCacheNow - activeRwyCacheTime > 5) {
+            activeDepRwyCache = std::move(newDepRwyCache);
+            activeArrRwyCache = std::move(newArrRwyCache);
+            activeRwyCacheTime = rwyCacheNow;
+        }
+        auto dep = activeDepRwyCache.find(airport);
+        auto arr = activeArrRwyCache.find(airport);
+        if (dep != activeDepRwyCache.end()) myActiveRwysDep = dep->second;
+        if (arr != activeArrRwyCache.end()) myActiveRwysArr = arr->second;
     }
-    vector<string>& myActiveRwysDep = activeDepRwyCache[airport];
-    vector<string>& myActiveRwysArr = activeArrRwyCache[airport];
 
-    for (Rate r : rate) {
+    vector<Rate> ratesSnapshot;
+    {
+        std::lock_guard<std::mutex> lock(rateDataMutex);
+        ratesSnapshot = rate;
+    }
+    for (const Rate& r : ratesSnapshot) {
         if (r.airport == airport) {
             bool found = false;
             for (string dr : r.depRwyYes) {
@@ -383,7 +431,7 @@ Rate CDM::rateForRunway(string airport, string depRwy, string mySid) {
                                 a++;
                             }
                         }
-                        if (dataRatePos < r.rates.size()) {
+                        if (dataRatePos < r.rates.size() && dataRatePos < r.ratesLvo.size()) {
                             knownMyrate.rates = {r.rates[dataRatePos]};
                             knownMyrate.ratesLvo = {r.ratesLvo[dataRatePos]};
                             if (dataRatePos < r.ratesRunwayPressure.size()) {
@@ -434,6 +482,7 @@ int CDM::getHourlyRateForRunway(const string& airport, const string& depRwy) {
             a++;
         }
     }
+    if (dataRatePos < 0 || static_cast<size_t>(dataRatePos) >= dataRate.rates.size()) return 6;
     try {
         return std::stoi(dataRate.rates[dataRatePos]);
     } catch (...) {
@@ -442,7 +491,7 @@ int CDM::getHourlyRateForRunway(const string& airport, const string& depRwy) {
 }
 
 void CDM::RemoveMasterAirports() {
-    if (!masterAirports.empty()) {
+    if (!getMasterAirports().empty()) {
         string ATC_Position = myAtcCallsign;
         if (ATC_Position.size() < 2) {
             ATC_Position = ControllerMyself().GetCallsign();

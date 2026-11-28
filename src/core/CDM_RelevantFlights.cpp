@@ -70,6 +70,7 @@ void CDM::getCdmServerRelevantFlights() {
                         std::string isExcluded = cleanString(atfcm["excluded"]);
                         std::string isRea = cleanString(atfcm["isRea"]);
                         std::string isSir = cleanString(atfcm["SIR"]);
+                        std::string isSwm = cleanString(atfcm["SWM"]);
 
                         if (mostPenalisingRegulation.length() <= 2 && ctot.length() > 2) {
                             mostPenalisingRegulation = "N/A";
@@ -77,11 +78,14 @@ void CDM::getCdmServerRelevantFlights() {
 
                         relevantFlightsTemp.push_back({callsign, departure, arrival, eobt, tobt, taxi, ctot, aobt, eta,
                                                        mostPenalisingRegulation, atfcmStatus, informed, isCdm,
-                                                       isExcluded, isRea, isSir});
+                                                       isExcluded, isRea, isSir, isSwm});
                     }
                 }
             }
-            relevantFlights = relevantFlightsTemp;
+            {
+                std::lock_guard<std::mutex> lock(relevantFlightsMutex);
+                relevantFlights = std::move(relevantFlightsTemp);
+            }
             addLogLine("COMPLETED - getCdmServerRelevantFlights");
         } catch (const std::exception& e) {
             addLogLine("ERROR: Unhandled exception getCdmServerRelevantFlights: " + (string)e.what());
@@ -95,7 +99,10 @@ vector<string> CDM::getCDMAirports() { return CDMairports; }
 
 string CDM::getFilterFlightsText() { return flightsFilterText; }
 
-vector<vector<string>> CDM::returnRelevantFlights() { return relevantFlights; }
+vector<vector<string>> CDM::returnRelevantFlights() {
+    std::lock_guard<std::mutex> lock(relevantFlightsMutex);
+    return relevantFlights;
+}
 
 bool CDM::isDepartureAtcOffline(const string& airport) const { return vatsimAtcStatus_.isConfirmedOffline(airport); }
 
@@ -112,61 +119,21 @@ vector<vector<string>> CDM::getServerMasterAirports() {
 void CDM::fetchRelevantFlights() { runDetachedTask(&CDM::getCdmServerRelevantFlights); }
 
 bool CDM::setCdmServerStatusFromDialog(std::vector<std::string> flight, string request) {
-    string requestToDo = "";
-    if (request == "EXCL") {
-        if (flight[13] == "true")
-            requestToDo = "EXCLUDED/0";
-        else
-            requestToDo = "EXCLUDED/1";
+    size_t column = 0;
+    string prefix;
+    if (request == "EXCL") { column = 13; prefix = "EXCLUDED/"; }
+    else if (request == "REA") { column = 14; prefix = "REA/"; }
+    else if (request == "SIR") { column = 15; prefix = "SIR/"; }
+    else if (request == "SWM") { column = 16; prefix = "SWM/"; }
+    else return false;
+    if (flight.size() <= column || flight[0].empty()) return false;
 
-        for (int i = 0; i < (int)relevantFlights.size(); i++) {
-            if (relevantFlights[i][0] == flight[0])
-                if (requestToDo == "EXCLUDED/1")
-                    relevantFlights[i][13] = "true";
-                else
-                    relevantFlights[i][13] = "false";
-        }
-    }
-    if (request == "REA") {
-        if (flight[14] == "true")
-            requestToDo = "REA/0";
-        else
-            requestToDo = "REA/1";
-
-        for (int i = 0; i < (int)relevantFlights.size(); i++) {
-            if (relevantFlights[i][0] == flight[0])
-                if (requestToDo == "REA/1")
-                    relevantFlights[i][14] = "true";
-                else
-                    relevantFlights[i][14] = "false";
-        }
-    }
-    if (request == "SIR") {
-        if (flight[15] == "true")
-            requestToDo = "SIR/0";
-        else
-            requestToDo = "SIR/1";
-
-        for (int i = 0; i < (int)relevantFlights.size(); i++) {
-            if (relevantFlights[i][0] == flight[0])
-                if (requestToDo == "SIR/1")
-                    relevantFlights[i][15] = "true";
-                else
-                    relevantFlights[i][15] = "false";
-        }
-    }
-    if (request == "SWM") {
-        if (flight[16] == "true")
-            requestToDo = "SWM/0";
-        else
-            requestToDo = "SWM/1";
-
-        for (int i = 0; i < (int)relevantFlights.size(); i++) {
-            if (relevantFlights[i][0] == flight[0])
-                if (requestToDo == "SWM/1")
-                    relevantFlights[i][16] = "true";
-                else
-                    relevantFlights[i][16] = "false";
+    const bool enable = flight[column] != "true";
+    const string requestToDo = prefix + (enable ? "1" : "0");
+    {
+        std::lock_guard<std::mutex> lock(relevantFlightsMutex);
+        for (auto& row : relevantFlights) {
+            if (row.size() > column && row[0] == flight[0]) row[column] = enable ? "true" : "false";
         }
     }
     runDetachedTask(&CDM::setCdmSts, flight[0], requestToDo);

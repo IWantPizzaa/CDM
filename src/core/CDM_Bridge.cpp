@@ -174,6 +174,8 @@ void CDM::updateBridge() {
         api->set_global(bridgeProvider, bridgeFieldIds[BRIDGE_AIRPORT_PANEL], &value);
     }
 
+    const auto sentMessages = snapshotMessagesSent();
+    const auto deiceSnapshot = snapshotDeiceList();
     unordered_set<string> publishedThisTick;
     for (const Plane& plane : slotList) {
         if (plane.callsign.empty()) continue;
@@ -195,7 +197,7 @@ void CDM::updateBridge() {
         bridgeSetTime(aircraft, BRIDGE_TSAC, tsac == "9999" ? "" : tsac);
         bridgeSetTime(aircraft, BRIDGE_ASRT, asrt);
         bridgeSetTime(aircraft, BRIDGE_ASAT, findAsat(plane.callsign));
-        bridgeSetString(aircraft, BRIDGE_DEICE, findCallsignValue(deiceList, plane.callsign));
+        bridgeSetString(aircraft, BRIDGE_DEICE, findCallsignValue(deiceSnapshot, plane.callsign));
         bridgeSetString(aircraft, BRIDGE_TOBT_SET_BY, tobtSetBy);
         bridgeSetString(aircraft, BRIDGE_FLOW_RESTRICTION, plane.flowReason);
         bridgeSetString(aircraft, BRIDGE_ECFMP_RESTRICTION, "");
@@ -203,7 +205,7 @@ void CDM::updateBridge() {
         ESB_Value manualCtot = ESB_Bool(plane.hasManualCtot);
         api->set_ac(bridgeProvider, aircraft, bridgeFieldIds[BRIDGE_MANUAL_CTOT], &manualCtot);
 
-        const bool pmSent = find(messagesSent.begin(), messagesSent.end(), plane.callsign) != messagesSent.end();
+        const bool pmSent = find(sentMessages.begin(), sentMessages.end(), plane.callsign) != sentMessages.end();
         ESB_Value pmSentValue = ESB_Bool(pmSent);
         api->set_ac(bridgeProvider, aircraft, bridgeFieldIds[BRIDGE_PM_SENT], &pmSentValue);
     }

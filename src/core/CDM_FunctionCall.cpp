@@ -30,7 +30,7 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
         bool AtcMe = false;
         bool master = false;
 
-        for (string apt : masterAirports) {
+        for (const string& apt : getMasterAirports()) {
             if (apt == fp.GetFlightPlanData().GetOrigin()) {
                 master = true;
             }
@@ -132,7 +132,7 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
                                 }
                             }
                             // Set EOBT in API
-                            runDetachedTask(&CDM::setOBTApi, fp.GetCallsign(), editedEOBT, true, true);
+                            runDetachedTask(&CDM::setOBTApi, fp.GetCallsign(), editedEOBT, true, true, slotList);
                         }
                     }
                 }
@@ -162,7 +162,7 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
                                 }
                             }
                             // Set EOBT in API
-                            runDetachedTask(&CDM::setOBTApi, fp.GetCallsign(), timeNow, true, true);
+                            runDetachedTask(&CDM::setOBTApi, fp.GetCallsign(), timeNow, true, true, slotList);
                         }
 
                         // Set REA Status
@@ -342,17 +342,21 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
                 addLogLine("TRIGGER - TAG_FUNC_DEICE_NONE");
 
                 // Remove plane from deice list
-                for (size_t i = 0; i < deiceList.size(); i++) {
-                    if (deiceList[i][0] == fp.GetCallsign()) {
-                        deiceList.erase(deiceList.begin() + i);
-                    }
+                const string deiceCallsign = fp.GetCallsign();
+                {
+                    std::lock_guard<std::mutex> lock(deiceListMutex);
+                    deiceList.erase(std::remove_if(deiceList.begin(), deiceList.end(), [&](const auto& entry) {
+                        return !entry.empty() && entry[0] == deiceCallsign;
+                    }), deiceList.end());
                 }
                 setFlightStripInfo(fp, "", 5);
                 // Remove plane from taxiTimesList
-                for (size_t j = 0; j < taxiTimesList.size(); j++) {
-                    if (taxiTimesList[j].substr(0, taxiTimesList[j].find(",")) == fp.GetCallsign()) {
-                        taxiTimesList.erase(taxiTimesList.begin() + j);
-                    }
+                {
+                    std::lock_guard<std::mutex> lock(taxiTimesListMutex);
+                    taxiTimesList.erase(std::remove_if(taxiTimesList.begin(), taxiTimesList.end(),
+                                                       [&](const string& entry) {
+                                                           return entry.substr(0, entry.find(",")) == fp.GetCallsign();
+                                                       }), taxiTimesList.end());
                 }
                 // Remove plane from slotlist to recalculate times
                 for (size_t i = 0; i < slotList.size(); i++) {
@@ -1028,7 +1032,8 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
                                     }
                                 }
                                 // Check API
-                                runDetachedTask(&CDM::setOBTApi, slotList[i].callsign, slotList[i].tsat, true, false);
+                                runDetachedTask(&CDM::setOBTApi, slotList[i].callsign, slotList[i].tsat, true, false,
+                                                slotList);
                             }
 
                             if (!isCdmAirport(fp.GetFlightPlanData().GetOrigin())) {
@@ -1125,7 +1130,7 @@ void CDM::OnFunctionCall(int FunctionId, const char* ItemString, POINT Pt, RECT 
                                     slotList[a].showData = false;
                                 }
                             }
-                            runDetachedTask(&CDM::setOBTApi, (string)fp.GetCallsign(), "", true, false);
+                            runDetachedTask(&CDM::setOBTApi, (string)fp.GetCallsign(), "", true, false, slotList);
                         }
                         //}
                     }

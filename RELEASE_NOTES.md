@@ -1,4 +1,16 @@
-# CDM 2.32c
+# CDM 2.32d
+
+Windows x86 (32-bit) beta for EuroScope. Fixes the access violation observed
+after connecting with 2.32c: a background save copied the Master-airport list
+while another thread changed it. Master reads now use synchronized snapshots.
+Background saves, recalculation, API refreshes and non-CDM EXOT processing now
+receive stable flight-list snapshots. The recalculation handoff, taxi-time and
+delay lists, and runway-rate cache are synchronized. Malformed rate entries and
+out-of-range list accesses are guarded, and OBT responses update only the
+requested flight. The XML is unchanged. Runtime validation in EuroScope is still
+required.
+
+## Previous release: 2.32c
 
 Windows x86 (32-bit) beta for EuroScope. This release restores the vSMR airport
 panel by publishing the `airport_panel` snapshot through EuroScope Plugin Bridge

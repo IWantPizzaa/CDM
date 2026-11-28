@@ -89,14 +89,19 @@ static void TypeTextInstant(const std::string& text) {
 }
 
 void CDM::sendAtfcmPrivateMessageToPilotCon(std::vector<std::string> flight) {
-    for (int i = 0; i < (int)relevantFlights.size(); i++) {
-        if (relevantFlights[i][0] == flight[0]) relevantFlights[i][11] = "true";
+    if (flight.empty()) return;
+    {
+        std::lock_guard<std::mutex> lock(relevantFlightsMutex);
+        for (auto& row : relevantFlights) {
+            if (row.size() > 11 && row[0] == flight[0]) row[11] = "true";
+        }
     }
 
     runDetachedTask(&CDM::sendAtfcmPrivateMessageToPilot, flight);
 }
 
 bool CDM::sendAtfcmPrivateMessageToPilot(std::vector<std::string> flight) {
+    if (flight.size() <= 10 || flight[0].empty()) return false;
     string callsign = "";
     bool correctPosition = false;
     if (ControllerMyself().IsValid()) {
@@ -167,14 +172,11 @@ void CDM::sendCdmMessageToPilot(string callsign) {
     if (!correctPosition) {
         sendMessage("You are not in a position able to send CDM messages to pilots.");
     }
-    bool found = false;
-    for (string flt : messagesSent) {
-        if (flt == callsign) {
-            found = true;
+    {
+        std::lock_guard<std::mutex> lock(messagesSentMutex);
+        if (std::find(messagesSent.begin(), messagesSent.end(), callsign) == messagesSent.end()) {
+            messagesSent.push_back(callsign);
         }
-    }
-    if (!found) {
-        messagesSent.push_back(callsign);
     }
 
     string msg = ".msg " + callsign + " " + pm_message;

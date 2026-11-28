@@ -239,7 +239,7 @@ int CDM::getNonCdmTaxiTimeWithPolygonMatch(string airport, string runway, double
     return defTaxiTime;
 }
 
-void CDM::processNonCdmExotFlights() {
+void CDM::processNonCdmExotFlights(vector<string> planeAirportSnapshot) {
     // Process non-CDM flights that need EXOT messages sent
     // Called periodically to:
     // 1. Detect new flights at non-CDM airports with taxi zones
@@ -251,14 +251,15 @@ void CDM::processNonCdmExotFlights() {
         time_t now = std::time(nullptr);
 
         // Skip if not enough time has passed since last check
-        if (nonCdmExotLastCheckTime > 0 && (now - nonCdmExotLastCheckTime) < 5) {
+        time_t lastCheck = nonCdmExotLastCheckTime.load();
+        if (lastCheck > 0 && (now - lastCheck) < 5) {
             return;
         }
-        nonCdmExotLastCheckTime = now;
+        if (!nonCdmExotLastCheckTime.compare_exchange_strong(lastCheck, now)) return;
 
         // Iterate through known flights (via slotList and planeAiportList) to detect non-CDM airport flights
         // Use planeAiportList which has: callsign,airport pairs
-        for (const auto& planeAirportEntry : planeAiportList) {
+        for (const auto& planeAirportEntry : planeAirportSnapshot) {
             // Parse the entry: "CALLSIGN,AIRPORT"
             size_t commaPos = planeAirportEntry.find(",");
             if (commaPos == string::npos || commaPos == 0) {

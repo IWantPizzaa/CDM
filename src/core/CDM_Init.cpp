@@ -515,7 +515,12 @@ CDM::CDM(void)
     remarksOption = false;
 
     // Init refreshActions
-    refresh1 = false;
+    {
+        std::lock_guard<std::mutex> lock(refreshStateMutex);
+        refresh1 = false;
+        readyToUpdateList = false;
+        slotListToUpdate.clear();
+    }
     refresh3 = false;
     refresh4 = false;
 
